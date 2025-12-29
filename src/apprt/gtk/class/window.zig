@@ -387,8 +387,16 @@ pub const Window = extern struct {
     /// Create a new tab with the given parent. The tab will be inserted
     /// at the position dictated by the `window-new-tab-position` config.
     /// The new tab will be selected.
-    pub fn newTab(self: *Self, parent_: ?*CoreSurface) void {
-        _ = self.newTabPage(parent_, .tab, .none);
+    pub fn newTab(
+        self: *Self,
+        parent_: ?*CoreSurface,
+        command_argv: ?[]const [:0]const u8,
+    ) void {
+        if (command_argv) |argv| {
+            _ = self.newTabPage(parent_, .tab, .{ .command = .{ .direct = argv } });
+        } else {
+            _ = self.newTabPage(parent_, .tab, .none);
+        }
     }
 
     pub fn newTabForWindow(
@@ -444,6 +452,12 @@ pub const Window = extern struct {
                 surfaceInit(p.rt_surface.gobj(), self);
             }
             tab.setParentWithContext(p, context);
+        }
+        if (command_argv) |argv| command: {
+            const surface = tab.getActiveSurface() orelse break :command;
+            surface.setCommandOverride(argv) catch |err| {
+                log.warn("failed to set command override err={}", .{err});
+            };
         }
 
         // Get the position that we should insert the new tab at.

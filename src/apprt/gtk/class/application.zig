@@ -1399,6 +1399,8 @@ pub const Application = extern struct {
         const actions = [_]ext.actions.Action(Self){
             .init("new-window", actionNewWindow, null),
             .init("new-window-command", actionNewWindow, as_variant_type),
+            .init("new-tab", actionNewTab, null),
+            .init("new-tab-command", actionNewTab, as_variant_type),
             .init("open-config", actionOpenConfig, null),
             .init("present-surface", actionPresentSurface, t_variant_type),
             .init("quit", actionQuit, null),
@@ -1777,12 +1779,110 @@ pub const Application = extern struct {
         };
     }
 
+    /// Handle `app.new-tab` and `app.new-tab-command` GTK actions (IPC)
+    pub fn actionNewTab(
+        _: *gio.SimpleAction,
+        parameter_: ?*glib.Variant,
+        self: *Self,
+    ) callconv(.c) void {
+        log.debug("received new tab action", .{});
+
+        const alloc = Application.default().allocator();
+        const argv = parseCommandArgv(alloc, parameter_) catch |err| {
+            log.warn("invalid new-tab args err={}", .{err});
+            return;
+        };
+        defer if (argv) |v| freeCommandArgv(alloc, v);
+
+        if (argv) |v| {
+            if (self.core().focusedSurface()) |focused| {
+                const surface = focused.rt_surface.surface;
+                const window = ext.getAncestor(
+                    Window,
+                    surface.as(gtk.Widget),
+                ) orelse {
+                    log.warn("surface is not in a window, creating new window", .{});
+                    Action.newWindow(self, null, .{
+                        .command = .{ .direct = v },
+                    }) catch |err| {
+                        log.warn("failed to create new window err={}", .{err});
+                    };
+                    return;
+                };
+
+                window.newTab(focused, v);
+                return;
+            }
+
+            Action.newWindow(self, null, .{
+                .command = .{ .direct = v },
+            }) catch |err| {
+                log.warn("failed to create new window err={}", .{err});
+            };
+            return;
+        }
+
+        // Without args, delegate to the regular new-tab action.
+        if (self.core().focusedSurface()) |focused| {
+            self.core().performAction(self.rt(), .{ .surface = focused }, .new_tab, {}) catch |err| {
+                log.warn("failed to perform new_tab err={}", .{err});
+            };
+            return;
+        }
+    }
+
     pub fn actionOpenConfig(
         _: *gio.SimpleAction,
         _: ?*glib.Variant,
         self: *Self,
     ) callconv(.c) void {
         _ = self.core().mailbox.push(.open_config, .forever);
+    }
+
+    const ParseCommandArgvError = Allocator.Error || error{
+        InvalidArgs,
+        InvalidArgType,
+    };
+
+    fn parseCommandArgv(
+        alloc: Allocator,
+        parameter_: ?*glib.Variant,
+    ) ParseCommandArgvError!?[][:0]const u8 {
+        const parameter = parameter_ orelse return null;
+
+        const as_variant_type = glib.VariantType.new("as");
+        defer as_variant_type.free();
+        if (glib.Variant.isOfType(parameter, as_variant_type) == 0) {
+            return error.InvalidArgType;
+        }
+
+        const s_variant_type = glib.VariantType.new("s");
+        defer s_variant_type.free();
+
+        var list: std.ArrayList([:0]const u8) = .empty;
+        errdefer {
+            for (list.items) |arg| alloc.free(arg);
+            list.deinit(alloc);
+        }
+
+        var it: glib.VariantIter = undefined;
+        _ = it.init(parameter);
+        while (it.nextValue()) |value| {
+            defer value.unref();
+            if (value.isOfType(s_variant_type) == 0) continue;
+
+            var len: usize = undefined;
+            const buf = value.getString(&len);
+            try list.append(alloc, try alloc.dupeZ(u8, buf[0..len]));
+        }
+
+        if (list.items.len == 0) return error.InvalidArgs;
+        return try list.toOwnedSlice(alloc);
+    }
+
+    fn freeCommandArgv(alloc: Allocator, argv: []const [:0]const u8) void {
+        for (argv) |arg| alloc.free(arg);
+        alloc.free(argv);
     }
 
     fn actionPresentSurface(
@@ -2212,7 +2312,7 @@ const Action = struct {
                     log.warn("surface is not in a window, ignoring new_tab", .{});
                     return false;
                 };
-                window.newTab(core);
+                window.newTab(core, null);
                 return true;
             },
         }

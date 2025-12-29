@@ -327,15 +327,16 @@ pub const App = struct {
     /// Note that this is a static function. Since this is called from a CLI app (or
     /// some other process that is not Ghostty) there is no full-featured apprt App
     /// to use.
+    ///
+    /// On macOS/iOS (embedded runtime), this uses Unix socket IPC to communicate
+    /// with a running Ghostty instance.
     pub fn performIpc(
-        _: Allocator,
-        _: apprt.ipc.Target,
+        alloc: Allocator,
+        target: apprt.ipc.Target,
         comptime action: apprt.ipc.Action.Key,
-        _: apprt.ipc.Action.Value(action),
+        value: apprt.ipc.Action.Value(action),
     ) (Allocator.Error || std.posix.WriteError || apprt.ipc.Errors)!bool {
-        switch (action) {
-            .new_window => return false,
-        }
+        return apprt.socket.performIpc(alloc, target, action, value);
     }
 };
 

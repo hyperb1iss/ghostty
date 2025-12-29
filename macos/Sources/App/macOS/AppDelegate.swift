@@ -161,6 +161,9 @@ class AppDelegate: NSObject,
     /// If multiple items map to the same shortcut, the most recent one wins.
     private var menuItemsByShortcut: [MenuShortcutKey: Weak<NSMenuItem>] = [:]
 
+    /// IPC socket server for remote control
+    private var ipcSocketServer: IPCSocketServer?
+
     override init() {
 #if DEBUG
         ghostty = Ghostty.App(configPath: ProcessInfo.processInfo.environment["GHOSTTY_CONFIG_PATH"])
@@ -315,6 +318,10 @@ class AppDelegate: NSObject,
         // Setup signal handlers
         setupSignals()
 
+        // Start IPC socket server for remote control
+        ipcSocketServer = IPCSocketServer(appDelegate: self)
+        ipcSocketServer?.start()
+
         switch Ghostty.launchSource {
         case .app:
             // Don't have to do anything.
@@ -427,6 +434,9 @@ class AppDelegate: NSObject,
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Stop the IPC socket server
+        ipcSocketServer?.stop()
+
         // We have no notifications we want to persist after death,
         // so remove them all now. In the future we may want to be
         // more selective and only remove surface-targeted notifications.

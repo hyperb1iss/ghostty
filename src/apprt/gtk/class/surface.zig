@@ -581,6 +581,12 @@ pub const Surface = extern struct {
         /// core surface.
         pwd: ?[:0]const u8 = null,
 
+        /// Optional command override for this surface.
+        ///
+        /// This must be set prior to initialization and will be used as the
+        /// command for the initial process in this surface.
+        command_override: ?[][:0]const u8 = null,
+
         /// The title of this surface, if any has been set.
         title: ?[:0]const u8 = null,
 
@@ -784,6 +790,40 @@ pub const Surface = extern struct {
                 }
             }
         }
+    }
+
+    /// Set a command override for this surface. This must be called prior to
+    /// surface realization.
+    pub fn setCommandOverride(
+        self: *Self,
+        argv: []const [:0]const u8,
+    ) Allocator.Error!void {
+        const priv = self.private();
+
+        if (priv.core_surface != null) {
+            log.warn("setCommandOverride called after surface is already realized", .{});
+            return;
+        }
+
+        const alloc = Application.default().allocator();
+
+        if (priv.command_override) |existing| {
+            for (existing) |arg| alloc.free(arg);
+            alloc.free(existing);
+            priv.command_override = null;
+        }
+
+        const copy = try alloc.alloc([:0]const u8, argv.len);
+        errdefer {
+            for (copy) |arg| alloc.free(arg);
+            alloc.free(copy);
+        }
+
+        for (argv, 0..) |arg, i| {
+            copy[i] = try alloc.dupeZ(u8, arg[0..arg.len]);
+        }
+
+        priv.command_override = copy;
     }
 
     /// Force the surface to redraw itself. Ghostty often will only redraw
@@ -1922,6 +1962,11 @@ pub const Surface = extern struct {
         if (priv.pwd) |v| {
             glib.free(@ptrCast(@constCast(v)));
             priv.pwd = null;
+        }
+        if (priv.command_override) |argv| {
+            for (argv) |arg| alloc.free(arg);
+            alloc.free(argv);
+            priv.command_override = null;
         }
         if (priv.title) |v| {
             glib.free(@ptrCast(@constCast(v)));
@@ -3403,6 +3448,7 @@ pub const Surface = extern struct {
             try wd_val.finalize(config_alloc);
             config.@"working-directory" = wd_val;
         }
+        if (priv.command_override) |argv| config.command = .{ .direct = argv };
 
         // Initialize the surface
         surface.init(

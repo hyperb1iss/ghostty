@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const internal_os = @import("../os/main.zig");
@@ -6,13 +7,18 @@ const apprt = @import("../apprt.zig");
 pub const resourcesDir = internal_os.resourcesDir;
 
 pub const App = struct {
-    /// Always return false as there is no apprt to communicate with.
+    /// For `none` runtime builds, we only support IPC on platforms that have
+    /// a separate native app runtime (currently: macOS via the Swift app).
     pub fn performIpc(
-        _: Allocator,
-        _: apprt.ipc.Target,
+        alloc: Allocator,
+        target: apprt.ipc.Target,
         comptime action: apprt.ipc.Action.Key,
-        _: apprt.ipc.Action.Value(action),
+        value: apprt.ipc.Action.Value(action),
     ) !bool {
+        if (builtin.os.tag.isDarwin()) {
+            return try apprt.socket.performIpc(alloc, target, action, value);
+        }
+
         return false;
     }
 };

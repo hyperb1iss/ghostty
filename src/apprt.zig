@@ -14,6 +14,7 @@ const structs = @import("apprt/structs.zig");
 
 pub const action = @import("apprt/action.zig");
 pub const ipc = @import("apprt/ipc.zig");
+pub const socket = @import("apprt/socket.zig");
 pub const gtk = @import("apprt/gtk.zig");
 pub const none = @import("apprt/none.zig");
 pub const browser = @import("apprt/browser.zig");

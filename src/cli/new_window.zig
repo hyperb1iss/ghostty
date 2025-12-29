@@ -127,7 +127,9 @@ pub const Options = struct {
 /// of Ghostty if it is not already running. See the Ghostty website for
 /// information on properly configuring D-Bus activation.
 ///
-/// Only supported on GTK.
+/// On macOS, Ghostty must already be running so the CLI can connect to it.
+///
+/// Supported on GTK and macOS.
 ///
 /// Flags:
 ///
@@ -213,16 +215,13 @@ fn runArgs(
         .{
             .arguments = if (opts._arguments.items.len == 0) null else opts._arguments.items,
         },
-    ) catch |err| switch (err) {
-        error.IPCFailed => {
-            // The apprt should have printed a more specific error message
-            // already.
-            return 1;
-        },
-        else => {
+    ) catch |err| {
+        // `error.IPCFailed` should have already printed a more specific
+        // message via the platform apprt.
+        if (err != error.IPCFailed) {
             try stderr.print("Sending the IPC failed: {}", .{err});
-            return 1;
-        },
+        }
+        return 1;
     }) return 0;
 
     // If we get here, the platform is not supported.
