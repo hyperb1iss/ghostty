@@ -91,6 +91,34 @@ pub const Action = union(enum) {
     /// Close a specific surface.
     close_surface: CloseSurface,
 
+    /// Resize a surface's window.
+    resize_surface: ResizeSurface,
+
+    pub const ResizeSurface = struct {
+        /// The surface ID to resize (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// Number of rows (if resizing by cells). 0 means don't change.
+        rows: u32 = 0,
+
+        /// Number of columns (if resizing by cells). 0 means don't change.
+        cols: u32 = 0,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            rows: u32,
+            cols: u32,
+        };
+
+        pub fn cval(self: ResizeSurface) ResizeSurface.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .rows = self.rows,
+                .cols = self.cols,
+            };
+        }
+    };
+
     pub const CloseSurface = struct {
         /// The surface ID to close (from list_surfaces).
         surface_id: [:0]const u8,
@@ -247,6 +275,7 @@ pub const Action = union(enum) {
         get_screen,
         focus_surface,
         close_surface,
+        resize_surface,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");

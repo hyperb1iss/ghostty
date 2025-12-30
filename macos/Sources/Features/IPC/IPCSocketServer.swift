@@ -239,6 +239,8 @@ class IPCSocketServer {
                 return handleFocusSurface(payload: payload)
             case .close_surface(let payload):
                 return handleCloseSurface(payload: payload)
+            case .resize_surface(let payload):
+                return handleResizeSurface(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -513,6 +515,46 @@ class IPCSocketServer {
         }
     }
 
+    private func handleResizeSurface(payload: IPCRequest.ResizeSurfacePayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard self != nil else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            guard let window = surface.window else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Get the cell size to calculate the new window size
+            let cellSize = surface.cellSize
+            guard cellSize.width > 0 && cellSize.height > 0 else {
+                throw IPCError.invalidArguments
+            }
+
+            // Get current size if we're only changing one dimension
+            let currentSize = surface.surfaceSize
+            let rows = payload.rows > 0 ? payload.rows : UInt32(currentSize?.rows ?? 24)
+            let cols = payload.cols > 0 ? payload.cols : UInt32(currentSize?.columns ?? 80)
+
+            // Calculate the new content size
+            let newWidth = CGFloat(cols) * cellSize.width
+            let newHeight = CGFloat(rows) * cellSize.height
+
+            // Set the window's content size
+            window.setContentSize(NSSize(width: newWidth, height: newHeight))
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
     /// Find a surface by its hex ID (e.g., "0x153872000")
     private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
         for window in NSApp.windows {
@@ -709,6 +751,7 @@ struct IPCRequest: Decodable {
         case get_screen(GetScreenPayload)
         case focus_surface(FocusSurfacePayload)
         case close_surface(CloseSurfacePayload)
+        case resize_surface(ResizeSurfacePayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
@@ -718,6 +761,7 @@ struct IPCRequest: Decodable {
             case get_screen
             case focus_surface
             case close_surface
+            case resize_surface
         }
 
         init(from decoder: Decoder) throws {
@@ -743,6 +787,9 @@ struct IPCRequest: Decodable {
             } else if container.contains(.close_surface) {
                 let payload = try container.decode(CloseSurfacePayload.self, forKey: .close_surface)
                 self = .close_surface(payload)
+            } else if container.contains(.resize_surface) {
+                let payload = try container.decode(ResizeSurfacePayload.self, forKey: .resize_surface)
+                self = .resize_surface(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -778,6 +825,12 @@ struct IPCRequest: Decodable {
 
     struct CloseSurfacePayload: Decodable {
         let surface_id: String
+    }
+
+    struct ResizeSurfacePayload: Decodable {
+        let surface_id: String
+        let rows: UInt32
+        let cols: UInt32
     }
 }
 

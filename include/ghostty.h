@@ -1048,6 +1048,13 @@ typedef struct {
   const char *surface_id;
 } ghostty_ipc_action_close_surface_s;
 
+// apprt.ipc.Action.ResizeSurface
+typedef struct {
+  const char *surface_id;
+  uint32_t rows;
+  uint32_t cols;
+} ghostty_ipc_action_resize_surface_s;
+
 typedef union {
   ghostty_ipc_action_new_window_s new_window;
   ghostty_ipc_action_new_tab_s new_tab;
@@ -1055,6 +1062,7 @@ typedef union {
   ghostty_ipc_action_get_screen_s get_screen;
   ghostty_ipc_action_focus_surface_s focus_surface;
   ghostty_ipc_action_close_surface_s close_surface;
+  ghostty_ipc_action_resize_surface_s resize_surface;
 } ghostty_ipc_action_u;
 
 // apprt.ipc.Action.Key
@@ -1066,6 +1074,7 @@ typedef enum {
   GHOSTTY_IPC_ACTION_GET_SCREEN,
   GHOSTTY_IPC_ACTION_FOCUS_SURFACE,
   GHOSTTY_IPC_ACTION_CLOSE_SURFACE,
+  GHOSTTY_IPC_ACTION_RESIZE_SURFACE,
 } ghostty_ipc_action_tag_e;
 
 //-------------------------------------------------------------------

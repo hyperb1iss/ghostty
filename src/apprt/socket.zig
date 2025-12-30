@@ -58,6 +58,7 @@ pub const Request = struct {
         get_screen: GetScreenPayload,
         focus_surface: FocusSurfacePayload,
         close_surface: CloseSurfacePayload,
+        resize_surface: ResizeSurfacePayload,
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -91,6 +92,15 @@ pub const Request = struct {
         pub const CloseSurfacePayload = struct {
             /// The surface ID to close.
             surface_id: []const u8,
+        };
+
+        pub const ResizeSurfacePayload = struct {
+            /// The surface ID to resize.
+            surface_id: []const u8,
+            /// Number of rows (0 = don't change).
+            rows: u32 = 0,
+            /// Number of columns (0 = don't change).
+            cols: u32 = 0,
         };
     };
 };
@@ -248,6 +258,13 @@ pub fn serializeRequest(
             .close_surface => .{
                 .close_surface = .{
                     .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                },
+            },
+            .resize_surface => .{
+                .resize_surface = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .rows = value.rows,
+                    .cols = value.cols,
                 },
             },
         },
