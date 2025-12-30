@@ -48,6 +48,65 @@ Ghostty's architecture is uniquely suited for this:
 3. **Opt-in write access** - Read operations (screen, scrollback) are separate from write operations (input injection)
 4. **Surface addressing** - All operations target specific surfaces via stable identifiers
 5. **Incremental adoption** - Start with core operations; extend over time
+6. **Socket-first, cross-platform** - One protocol that works identically on all platforms
+
+## Architecture
+
+### Why Unix Sockets Over Platform-Native IPC?
+
+The terminal is inherently a **cross-platform abstraction**. Users SSH from macOS to Linux, run the same commands everywhere, and expect consistent behavior. The automation API should follow this philosophy.
+
+**Considered alternatives:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| D-Bus (Linux) + AppleScript (macOS) | "Platform native" | Fragmented: clients must detect platform, duplicate logic |
+| D-Bus only | Standard on Linux | macOS/Windows don't have D-Bus |
+| AppleScript only | macOS native | Slow, limited data types, macOS only |
+| Unix sockets | Cross-platform, fast, structured JSON | Not "desktop native" |
+
+**Decision: Unix sockets as the single protocol.**
+
+Rationale:
+- **Cross-platform**: AF_UNIX works on Linux, macOS, and Windows 10+
+- **One client library**: Python/Node/Go code works everywhere without platform detection
+- **Structured data**: JSON responses with nested objects, arrays, binary (base64)
+- **Performance**: Low latency for high-frequency operations (screen reading)
+- **AI/MCP friendly**: Easy to integrate with Model Context Protocol servers
+
+### Transport Unification
+
+All IPC actions use the socket protocol:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   ghostty +<action>                         │
+│     +list-surfaces, +send-text, +new-tab, +screenshot       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Socket Protocol                          │
+│              JSON over Unix domain socket                   │
+│         $XDG_RUNTIME_DIR/ghostty/ghostty.sock              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Socket Server                            │
+│              Runs inside Ghostty process                    │
+│           Handles all actions uniformly                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### D-Bus Deprecation (Linux)
+
+The existing D-Bus implementation for `new_window` and `new_tab` is **deprecated** in favor of the unified socket protocol. D-Bus will be retained only for:
+
+- **Desktop activation**: Launching Ghostty via `.desktop` file
+- **Global shortcuts**: System-level keybindings that launch actions
+
+All programmatic automation should use the socket protocol.
 
 ## Protocol Specification
 
