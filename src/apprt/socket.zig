@@ -59,6 +59,7 @@ pub const Request = struct {
         focus_surface: FocusSurfacePayload,
         close_surface: CloseSurfacePayload,
         resize_surface: ResizeSurfacePayload,
+        screenshot_surface: ScreenshotSurfacePayload,
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -101,6 +102,13 @@ pub const Request = struct {
             rows: u32 = 0,
             /// Number of columns (0 = don't change).
             cols: u32 = 0,
+        };
+
+        pub const ScreenshotSurfacePayload = struct {
+            /// The surface ID to screenshot.
+            surface_id: []const u8,
+            /// Output file path (PNG format).
+            output_path: []const u8,
         };
     };
 };
@@ -265,6 +273,12 @@ pub fn serializeRequest(
                     .surface_id = std.mem.sliceTo(value.surface_id, 0),
                     .rows = value.rows,
                     .cols = value.cols,
+                },
+            },
+            .screenshot_surface => .{
+                .screenshot_surface = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .output_path = std.mem.sliceTo(value.output_path, 0),
                 },
             },
         },

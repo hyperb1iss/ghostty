@@ -241,6 +241,8 @@ class IPCSocketServer {
                 return handleCloseSurface(payload: payload)
             case .resize_surface(let payload):
                 return handleResizeSurface(payload: payload)
+            case .screenshot_surface(let payload):
+                return handleScreenshotSurface(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -555,6 +557,41 @@ class IPCSocketServer {
         }
     }
 
+    private func handleScreenshotSurface(payload: IPCRequest.ScreenshotSurfacePayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard self != nil else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Capture the surface view as an image
+            let bounds = surface.bounds
+            guard let bitmapRep = surface.bitmapImageRepForCachingDisplay(in: bounds) else {
+                throw IPCError.screenshotFailed
+            }
+
+            surface.cacheDisplay(in: bounds, to: bitmapRep)
+
+            // Convert to PNG data
+            guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+                throw IPCError.screenshotFailed
+            }
+
+            // Write to file
+            let url = URL(fileURLWithPath: payload.output_path)
+            try pngData.write(to: url)
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
     /// Find a surface by its hex ID (e.g., "0x153872000")
     private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
         for window in NSApp.windows {
@@ -752,6 +789,7 @@ struct IPCRequest: Decodable {
         case focus_surface(FocusSurfacePayload)
         case close_surface(CloseSurfacePayload)
         case resize_surface(ResizeSurfacePayload)
+        case screenshot_surface(ScreenshotSurfacePayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
@@ -762,6 +800,7 @@ struct IPCRequest: Decodable {
             case focus_surface
             case close_surface
             case resize_surface
+            case screenshot_surface
         }
 
         init(from decoder: Decoder) throws {
@@ -790,6 +829,9 @@ struct IPCRequest: Decodable {
             } else if container.contains(.resize_surface) {
                 let payload = try container.decode(ResizeSurfacePayload.self, forKey: .resize_surface)
                 self = .resize_surface(payload)
+            } else if container.contains(.screenshot_surface) {
+                let payload = try container.decode(ScreenshotSurfacePayload.self, forKey: .screenshot_surface)
+                self = .screenshot_surface(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -831,6 +873,11 @@ struct IPCRequest: Decodable {
         let surface_id: String
         let rows: UInt32
         let cols: UInt32
+    }
+
+    struct ScreenshotSurfacePayload: Decodable {
+        let surface_id: String
+        let output_path: String
     }
 }
 
@@ -901,6 +948,7 @@ enum IPCError: Error {
     case appUnavailable
     case invalidArguments
     case surfaceNotFound
+    case screenshotFailed
     case readFailed(Int32)
     case sendFailed(Int32)
     case connectionClosed
@@ -926,6 +974,8 @@ enum IPCError: Error {
             return "Invalid arguments"
         case .surfaceNotFound:
             return "Surface not found"
+        case .screenshotFailed:
+            return "Screenshot capture failed"
         case .readFailed(let e):
             return "Socket read failed (errno=\(e))"
         case .sendFailed(let e):

@@ -94,6 +94,29 @@ pub const Action = union(enum) {
     /// Resize a surface's window.
     resize_surface: ResizeSurface,
 
+    /// Take a screenshot of a surface.
+    screenshot_surface: ScreenshotSurface,
+
+    pub const ScreenshotSurface = struct {
+        /// The surface ID to screenshot (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// Output file path (PNG format).
+        output_path: [:0]const u8,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            output_path: [*:0]const u8,
+        };
+
+        pub fn cval(self: ScreenshotSurface) ScreenshotSurface.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .output_path = self.output_path.ptr,
+            };
+        }
+    };
+
     pub const ResizeSurface = struct {
         /// The surface ID to resize (from list_surfaces).
         surface_id: [:0]const u8,
@@ -276,6 +299,7 @@ pub const Action = union(enum) {
         focus_surface,
         close_surface,
         resize_surface,
+        screenshot_surface,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");
