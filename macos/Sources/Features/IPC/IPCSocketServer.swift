@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import OSLog
 import GhosttyKit
@@ -228,6 +229,8 @@ class IPCSocketServer {
                 return handleNewWindow(payload: payload)
             case .new_tab(let payload):
                 return handleNewTab(payload: payload)
+            case .list_surfaces:
+                return handleListSurfaces()
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -289,6 +292,93 @@ class IPCSocketServer {
             return IPCResponse(ok: true)
         case .failure(let err):
             return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
+    private func handleListSurfaces() -> IPCResponse {
+        let result: Result<[IPCResponse.WindowInfo], IPCError> = performOnMain { [weak self] in
+            guard let self = self else { throw IPCError.appUnavailable }
+
+            var windows: [IPCResponse.WindowInfo] = []
+
+            // Iterate over all terminal windows
+            for window in NSApp.windows {
+                guard let controller = window.windowController as? TerminalController else {
+                    continue
+                }
+
+                let windowId = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(window)))
+                let isFocused = window.isKeyWindow
+
+                var tabs: [IPCResponse.TabInfo] = []
+
+                // Get tabs from the window's tab group
+                if let tabGroup = window.tabGroup {
+                    for (tabIndex, tabWindow) in tabGroup.windows.enumerated() {
+                        guard let tabController = tabWindow.windowController as? TerminalController else {
+                            continue
+                        }
+
+                        let tabId = "\(windowId):\(tabIndex)"
+                        let isActive = tabWindow == window
+
+                        var surfaces: [IPCResponse.SurfaceInfo] = []
+
+                        // Get surfaces from the tab
+                        collectSurfaces(from: tabController.surfaceTree, into: &surfaces)
+
+                        tabs.append(IPCResponse.TabInfo(
+                            id: tabId,
+                            title: tabWindow.title,
+                            active: isActive,
+                            surfaces: surfaces
+                        ))
+                    }
+                } else {
+                    // Single-tab window
+                    let tabId = "\(windowId):0"
+                    var surfaces: [IPCResponse.SurfaceInfo] = []
+
+                    collectSurfaces(from: controller.surfaceTree, into: &surfaces)
+
+                    tabs.append(IPCResponse.TabInfo(
+                        id: tabId,
+                        title: window.title,
+                        active: true,
+                        surfaces: surfaces
+                    ))
+                }
+
+                windows.append(IPCResponse.WindowInfo(
+                    id: windowId,
+                    focused: isFocused,
+                    tabs: tabs
+                ))
+            }
+
+            return windows
+        }
+
+        switch result {
+        case .success(let windows):
+            return IPCResponse(ok: true, data: IPCResponse.ResponseData(windows: windows))
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
+    private func collectSurfaces(from tree: SplitTree<Ghostty.SurfaceView>, into surfaces: inout [IPCResponse.SurfaceInfo]) {
+        // SplitTree conforms to Sequence, iterating yields all leaf views
+        for surface in tree {
+            let surfaceId = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+            surfaces.append(IPCResponse.SurfaceInfo(
+                id: surfaceId,
+                title: surface.title ?? "",
+                focused: surface.focused,
+                pwd: surface.pwd ?? "",
+                rows: UInt32(surface.surfaceSize?.rows ?? 0),
+                cols: UInt32(surface.surfaceSize?.columns ?? 0)
+            ))
         }
     }
 
@@ -435,10 +525,12 @@ struct IPCRequest: Decodable {
     enum Action: Decodable {
         case new_window(NewWindowPayload?)
         case new_tab(NewTabPayload?)
+        case list_surfaces
 
         enum CodingKeys: String, CodingKey {
             case new_window
             case new_tab
+            case list_surfaces
         }
 
         init(from decoder: Decoder) throws {
@@ -450,6 +542,8 @@ struct IPCRequest: Decodable {
             } else if container.contains(.new_tab) {
                 let payload = try container.decodeIfPresent(NewTabPayload.self, forKey: .new_tab)
                 self = .new_tab(payload)
+            } else if container.contains(.list_surfaces) {
+                self = .list_surfaces
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -484,6 +578,34 @@ struct IPCResponse: Encodable {
 
     struct ResponseData: Encodable {
         let id: String?
+        let windows: [WindowInfo]?
+
+        init(id: String? = nil, windows: [WindowInfo]? = nil) {
+            self.id = id
+            self.windows = windows
+        }
+    }
+
+    struct WindowInfo: Encodable {
+        let id: String
+        let focused: Bool
+        let tabs: [TabInfo]
+    }
+
+    struct TabInfo: Encodable {
+        let id: String
+        let title: String
+        let active: Bool
+        let surfaces: [SurfaceInfo]
+    }
+
+    struct SurfaceInfo: Encodable {
+        let id: String
+        let title: String
+        let focused: Bool
+        let pwd: String
+        let rows: UInt32
+        let cols: UInt32
     }
 }
 

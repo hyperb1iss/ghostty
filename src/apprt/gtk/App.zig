@@ -92,6 +92,8 @@ pub fn performIpc(
     switch (action) {
         .new_window => return try ipcNewWindow(alloc, target, value),
         .new_tab => return try ipcNewTab(alloc, target, value),
+        // list_surfaces returns data, so use socket IPC directly
+        .list_surfaces => return try apprt.socket.performIpc(alloc, target, action, value),
     }
 }
 

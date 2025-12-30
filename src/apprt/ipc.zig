@@ -76,6 +76,9 @@ pub const Action = union(enum) {
     /// The arguments to pass to Ghostty as the command for a new tab.
     new_tab: NewTab,
 
+    /// List all open surfaces (windows, tabs, splits).
+    list_surfaces: void,
+
     pub const NewWindow = struct {
         /// A list of command arguments to launch in the new window. If this is
         /// `null` the command configured in the config or the user's default
@@ -154,6 +157,7 @@ pub const Action = union(enum) {
     pub const Key = enum(c_int) {
         new_window,
         new_tab,
+        list_surfaces,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");

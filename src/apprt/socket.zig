@@ -53,6 +53,7 @@ pub const Request = struct {
     pub const ActionPayload = union(ipc.Action.Key) {
         new_window: NewWindowPayload,
         new_tab: NewTabPayload,
+        list_surfaces: void,
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -80,6 +81,34 @@ pub const Response = struct {
     pub const Data = struct {
         /// ID of created resource (window, tab, etc.)
         id: ?[]const u8 = null,
+
+        /// List of windows (for list_surfaces action).
+        windows: ?[]const Window = null,
+    };
+
+    /// Window in list_surfaces response.
+    pub const Window = struct {
+        id: []const u8,
+        focused: bool = false,
+        tabs: []const Tab = &.{},
+    };
+
+    /// Tab in list_surfaces response.
+    pub const Tab = struct {
+        id: []const u8,
+        title: []const u8 = "",
+        active: bool = false,
+        surfaces: []const Surface = &.{},
+    };
+
+    /// Surface in list_surfaces response.
+    pub const Surface = struct {
+        id: []const u8,
+        title: []const u8 = "",
+        focused: bool = false,
+        pwd: []const u8 = "",
+        rows: u32 = 0,
+        cols: u32 = 0,
     };
 };
 
@@ -163,6 +192,7 @@ pub fn serializeRequest(
                     } else null,
                 },
             },
+            .list_surfaces => .{ .list_surfaces = {} },
         },
     };
 
@@ -322,6 +352,44 @@ pub fn performIpc(
     }
 
     return true;
+}
+
+/// Query IPC via Unix socket, returning the full response.
+///
+/// Unlike `performIpc`, this returns the full Response including any data
+/// returned by the server. Use this for actions that return data (like list_surfaces).
+pub fn queryIpc(
+    alloc: Allocator,
+    target: ipc.Target,
+    comptime action_key: ipc.Action.Key,
+    value: ipc.Action.Value(action_key),
+) !Response {
+    // Serialize the request
+    const request_json = serializeRequest(alloc, target, action_key, value) catch {
+        log.err("failed to serialize IPC request", .{});
+        return error.IPCFailed;
+    };
+    defer alloc.free(request_json);
+
+    // Connect and send
+    var client = Client.init(alloc, target) catch |err| switch (err) {
+        error.IPCFailed => {
+            log.err("no Ghostty instance found. Is Ghostty running?", .{});
+            return error.IPCFailed;
+        },
+        else => {
+            log.err("failed to connect to Ghostty", .{});
+            return error.IPCFailed;
+        },
+    };
+    defer client.deinit();
+
+    const response = client.sendRequest(request_json) catch {
+        log.err("failed to send IPC request", .{});
+        return error.IPCFailed;
+    };
+
+    return response;
 }
 
 test "socket path generation" {

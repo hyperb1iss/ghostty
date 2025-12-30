@@ -1035,6 +1035,7 @@ typedef union {
 typedef enum {
   GHOSTTY_IPC_ACTION_NEW_WINDOW,
   GHOSTTY_IPC_ACTION_NEW_TAB,
+  GHOSTTY_IPC_ACTION_LIST_SURFACES,
 } ghostty_ipc_action_tag_e;
 
 //-------------------------------------------------------------------
