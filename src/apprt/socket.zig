@@ -57,6 +57,7 @@ pub const Request = struct {
         send_text: SendTextPayload,
         get_screen: GetScreenPayload,
         focus_surface: FocusSurfacePayload,
+        close_surface: CloseSurfacePayload,
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -84,6 +85,11 @@ pub const Request = struct {
 
         pub const FocusSurfacePayload = struct {
             /// The surface ID to focus.
+            surface_id: []const u8,
+        };
+
+        pub const CloseSurfacePayload = struct {
+            /// The surface ID to close.
             surface_id: []const u8,
         };
     };
@@ -236,6 +242,11 @@ pub fn serializeRequest(
             },
             .focus_surface => .{
                 .focus_surface = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                },
+            },
+            .close_surface => .{
+                .close_surface = .{
                     .surface_id = std.mem.sliceTo(value.surface_id, 0),
                 },
             },

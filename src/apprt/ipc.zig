@@ -88,6 +88,24 @@ pub const Action = union(enum) {
     /// Focus a specific surface (bring window to front).
     focus_surface: FocusSurface,
 
+    /// Close a specific surface.
+    close_surface: CloseSurface,
+
+    pub const CloseSurface = struct {
+        /// The surface ID to close (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+        };
+
+        pub fn cval(self: CloseSurface) CloseSurface.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+            };
+        }
+    };
+
     pub const FocusSurface = struct {
         /// The surface ID to focus (from list_surfaces).
         surface_id: [:0]const u8,
@@ -228,6 +246,7 @@ pub const Action = union(enum) {
         send_text,
         get_screen,
         focus_surface,
+        close_surface,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");
