@@ -40,6 +40,7 @@ const Tab = @import("tab.zig").Tab;
 const CloseConfirmationDialog = @import("close_confirmation_dialog.zig").CloseConfirmationDialog;
 const ConfigErrorsDialog = @import("config_errors_dialog.zig").ConfigErrorsDialog;
 const GlobalShortcuts = @import("global_shortcuts.zig").GlobalShortcuts;
+const IpcServer = @import("../ipc_server.zig").Server;
 
 const log = std.log.scoped(.gtk_ghostty_application);
 
@@ -213,6 +214,9 @@ pub const Application = extern struct {
         /// by the system. If this is null, the LANG environment variable did
         /// not exist in Ghostty's environment variable.
         saved_language: ?[:0]const u8 = null,
+
+        /// IPC socket server for terminal automation
+        ipc_server: ?*IpcServer = null,
 
         pub var offset: c_int = 0;
     };
@@ -1303,6 +1307,9 @@ pub const Application = extern struct {
         // Setup our global shortcuts
         self.startupGlobalShortcuts();
 
+        // Setup our IPC socket server for terminal automation.
+        self.startupIpc();
+
         // If we have any config diagnostics from loading, then we
         // show the diagnostics dialog. We show this one as a general
         // modal (not to any specific window) because we don't even
@@ -1438,6 +1445,17 @@ pub const Application = extern struct {
         );
     }
 
+    /// Setup the IPC socket server for terminal automation.
+    fn startupIpc(self: *Self) void {
+        const priv = self.private();
+        const alloc = priv.core_app.alloc;
+
+        priv.ipc_server = IpcServer.init(alloc, self, null) catch |err| {
+            log.warn("IPC server initialization failed: {}", .{err});
+            return;
+        };
+    }
+
     fn activate(self: *Self) callconv(.c) void {
         log.debug("activate", .{});
 
@@ -1466,6 +1484,10 @@ pub const Application = extern struct {
                 log.warn("unable to remove signal source", .{});
             }
             priv.signal_source = null;
+        }
+        if (priv.ipc_server) |server| {
+            server.deinit();
+            priv.ipc_server = null;
         }
 
         gobject.Object.virtual_methods.dispose.call(

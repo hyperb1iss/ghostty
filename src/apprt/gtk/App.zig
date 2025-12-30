@@ -83,20 +83,29 @@ pub fn performAction(
 /// Note that this is a static function. Since this is called from a CLI app (or
 /// some other process that is not Ghostty) there is no full-featured apprt App
 /// to use.
+///
+/// On Linux, new_window and new_tab use D-Bus for desktop integration.
+/// Automation actions use the socket protocol (requires socket server).
 pub fn performIpc(
     alloc: Allocator,
     target: apprt.ipc.Target,
     comptime action: apprt.ipc.Action.Key,
     value: apprt.ipc.Action.Value(action),
 ) !bool {
-    switch (action) {
-        .new_window => return try ipcNewWindow(alloc, target, value),
-        .new_tab => return try ipcNewTab(alloc, target, value),
-        // list_surfaces returns data, so use socket IPC directly
-        .list_surfaces => return try apprt.socket.performIpc(alloc, target, action, value),
-        // send_text uses socket IPC
-        .send_text => return try apprt.socket.performIpc(alloc, target, action, value),
-    }
+    return switch (action) {
+        // D-Bus for window/tab management (Linux desktop integration)
+        .new_window => ipcNewWindow(alloc, target, value),
+        .new_tab => ipcNewTab(alloc, target, value),
+        // Socket for automation actions
+        .list_surfaces,
+        .send_text,
+        .get_screen,
+        .focus_surface,
+        .close_surface,
+        .resize_surface,
+        .screenshot_surface,
+        => apprt.socket.performIpc(alloc, target, action, value),
+    };
 }
 
 /// Redraw the inspector for the given surface.
