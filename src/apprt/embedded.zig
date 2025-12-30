@@ -1805,6 +1805,20 @@ pub const CAPI = struct {
         surface.textCallback(ptr[0..len]);
     }
 
+    /// Write raw bytes directly to the PTY without any paste encoding.
+    /// This is useful for IPC where exact control over bytes is needed.
+    /// To execute a command, include \r at the end.
+    export fn ghostty_surface_write_raw(
+        surface: *Surface,
+        ptr: [*]const u8,
+        len: usize,
+    ) void {
+        _ = surface.core_surface.writeRaw(ptr[0..len]) catch |err| {
+            log.err("error in writeRaw err={}", .{err});
+            return;
+        };
+    }
+
     /// Set the preedit text for the surface. This is used for IME
     /// composition. If the length is 0, then the preedit text is cleared.
     export fn ghostty_surface_preedit(

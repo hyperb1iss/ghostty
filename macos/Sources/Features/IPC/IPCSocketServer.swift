@@ -231,6 +231,8 @@ class IPCSocketServer {
                 return handleNewTab(payload: payload)
             case .list_surfaces:
                 return handleListSurfaces()
+            case .send_text(let payload):
+                return handleSendText(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -365,6 +367,68 @@ class IPCSocketServer {
         case .failure(let err):
             return IPCResponse(ok: false, error: err.localizedDescription)
         }
+    }
+
+    private func handleSendText(payload: IPCRequest.SendTextPayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard self != nil else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Send the text to the surface
+            guard let surfaceModel = surface.surfaceModel else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // writeRaw bypasses bracketed paste mode for exact control over PTY input.
+            // Use \r to execute commands.
+            MainActor.assumeIsolated {
+                surfaceModel.writeRaw(payload.text)
+            }
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
+    /// Find a surface by its hex ID (e.g., "0x153872000")
+    private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
+        for window in NSApp.windows {
+            guard let controller = window.windowController as? TerminalController else {
+                continue
+            }
+
+            // Check surfaces in this window's tree
+            for surface in controller.surfaceTree {
+                let id = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+                if id == surfaceId {
+                    return surface
+                }
+            }
+
+            // Also check tab group windows
+            if let tabGroup = window.tabGroup {
+                for tabWindow in tabGroup.windows {
+                    guard let tabController = tabWindow.windowController as? TerminalController else {
+                        continue
+                    }
+                    for surface in tabController.surfaceTree {
+                        let id = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+                        if id == surfaceId {
+                            return surface
+                        }
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     private func collectSurfaces(from tree: SplitTree<Ghostty.SurfaceView>, into surfaces: inout [IPCResponse.SurfaceInfo]) {
@@ -526,11 +590,13 @@ struct IPCRequest: Decodable {
         case new_window(NewWindowPayload?)
         case new_tab(NewTabPayload?)
         case list_surfaces
+        case send_text(SendTextPayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
             case new_tab
             case list_surfaces
+            case send_text
         }
 
         init(from decoder: Decoder) throws {
@@ -544,6 +610,9 @@ struct IPCRequest: Decodable {
                 self = .new_tab(payload)
             } else if container.contains(.list_surfaces) {
                 self = .list_surfaces
+            } else if container.contains(.send_text) {
+                let payload = try container.decode(SendTextPayload.self, forKey: .send_text)
+                self = .send_text(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -561,6 +630,11 @@ struct IPCRequest: Decodable {
 
     struct NewTabPayload: Decodable {
         let arguments: [String]?
+    }
+
+    struct SendTextPayload: Decodable {
+        let surface_id: String
+        let text: String
     }
 }
 
@@ -618,6 +692,7 @@ enum IPCError: Error {
     case pathTooLong
     case appUnavailable
     case invalidArguments
+    case surfaceNotFound
     case readFailed(Int32)
     case sendFailed(Int32)
     case connectionClosed
@@ -641,6 +716,8 @@ enum IPCError: Error {
             return "App not available"
         case .invalidArguments:
             return "Invalid arguments"
+        case .surfaceNotFound:
+            return "Surface not found"
         case .readFailed(let e):
             return "Socket read failed (errno=\(e))"
         case .sendFailed(let e):

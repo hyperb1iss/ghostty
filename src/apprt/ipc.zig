@@ -79,6 +79,29 @@ pub const Action = union(enum) {
     /// List all open surfaces (windows, tabs, splits).
     list_surfaces: void,
 
+    /// Send text to a specific surface.
+    send_text: SendText,
+
+    pub const SendText = struct {
+        /// The surface ID to send text to (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// The text to send to the surface.
+        text: [:0]const u8,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            text: [*:0]const u8,
+        };
+
+        pub fn cval(self: SendText) SendText.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .text = self.text.ptr,
+            };
+        }
+    };
+
     pub const NewWindow = struct {
         /// A list of command arguments to launch in the new window. If this is
         /// `null` the command configured in the config or the user's default
@@ -158,6 +181,7 @@ pub const Action = union(enum) {
         new_window,
         new_tab,
         list_surfaces,
+        send_text,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");
@@ -203,8 +227,8 @@ pub const Action = union(enum) {
         // At the time of writing, we don't promise ABI compatibility
         // so we can change this but I want to be aware of it.
         assert(@sizeOf(CValue) == switch (@sizeOf(usize)) {
-            4 => 4,
-            8 => 8,
+            4 => 8,
+            8 => 16, // SendText has 2 pointers
             else => unreachable,
         });
     }

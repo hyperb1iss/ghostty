@@ -48,6 +48,22 @@ extension Ghostty {
             }
         }
 
+        /// Write raw bytes directly to the PTY without any paste encoding.
+        ///
+        /// This bypasses bracketed paste mode and sends bytes exactly as provided.
+        /// Use this for IPC commands where you need exact control over what gets sent.
+        /// To execute a shell command, include `\r` at the end of the text.
+        @MainActor
+        func writeRaw(_ text: String) {
+            let len = text.utf8CString.count
+            if (len == 0) { return }
+
+            text.withCString { ptr in
+                // len includes the null terminator so we do len - 1
+                ghostty_surface_write_raw(surface, ptr, UInt(len - 1))
+            }
+        }
+
         /// Send a key event to the terminal.
         ///
         /// This sends the full key event including modifiers, action type, and text to the terminal.

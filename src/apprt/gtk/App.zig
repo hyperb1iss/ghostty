@@ -94,6 +94,8 @@ pub fn performIpc(
         .new_tab => return try ipcNewTab(alloc, target, value),
         // list_surfaces returns data, so use socket IPC directly
         .list_surfaces => return try apprt.socket.performIpc(alloc, target, action, value),
+        // send_text uses socket IPC
+        .send_text => return try apprt.socket.performIpc(alloc, target, action, value),
     }
 }
 

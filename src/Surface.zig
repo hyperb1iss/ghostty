@@ -3242,6 +3242,39 @@ pub fn textCallback(self: *Surface, text: []const u8) !void {
     try self.completeClipboardPaste(text, true);
 }
 
+/// Write raw bytes directly to the PTY without any paste encoding or
+/// bracketed paste handling. This is useful for IPC commands like send_text
+/// where the caller wants exact control over what bytes are sent.
+///
+/// Unlike textCallback, this does NOT:
+/// - Wrap with bracketed paste sequences
+/// - Replace newlines with carriage returns
+///
+/// The data is written exactly as provided. To execute a command, include
+/// a carriage return (\r) at the end of the text.
+pub fn writeRaw(self: *Surface, data: []const u8) !void {
+    // Crash metadata in case we crash in here
+    crash.sentry.thread_state = self.crashThreadState();
+    defer crash.sentry.thread_state = null;
+
+    if (data.len == 0) return;
+
+    // Scroll to bottom before writing
+    {
+        self.renderer_state.mutex.lock();
+        defer self.renderer_state.mutex.unlock();
+        self.scrollToBottom() catch |err| {
+            log.warn("error scrolling to bottom err={}", .{err});
+        };
+    }
+
+    // Write directly to the PTY
+    self.queueIo(try termio.Message.writeReq(
+        self.alloc,
+        data,
+    ), .unlocked);
+}
+
 /// Callback for when the surface is fully visible or not, regardless
 /// of focus state. This is used to pause rendering when the surface
 /// is not visible, and also re-render when it becomes visible again.

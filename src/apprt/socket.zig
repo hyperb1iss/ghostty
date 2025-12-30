@@ -54,6 +54,7 @@ pub const Request = struct {
         new_window: NewWindowPayload,
         new_tab: NewTabPayload,
         list_surfaces: void,
+        send_text: SendTextPayload,
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -63,6 +64,13 @@ pub const Request = struct {
         pub const NewTabPayload = struct {
             /// Command arguments to run in the new tab.
             arguments: ?[]const []const u8 = null,
+        };
+
+        pub const SendTextPayload = struct {
+            /// The surface ID to send text to.
+            surface_id: []const u8,
+            /// The text to send.
+            text: []const u8,
         };
     };
 };
@@ -193,6 +201,12 @@ pub fn serializeRequest(
                 },
             },
             .list_surfaces => .{ .list_surfaces = {} },
+            .send_text => .{
+                .send_text = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .text = std.mem.sliceTo(value.text, 0),
+                },
+            },
         },
     };
 
