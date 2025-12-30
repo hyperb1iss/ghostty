@@ -381,10 +381,10 @@ class IPCSocketServer {
 
     private func handleSendText(payload: IPCRequest.SendTextPayload) -> IPCResponse {
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
-            guard self != nil else { throw IPCError.appUnavailable }
+            guard let self else { throw IPCError.appUnavailable }
 
             // Find the surface by ID
-            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
                 throw IPCError.surfaceNotFound
             }
 
@@ -410,10 +410,10 @@ class IPCSocketServer {
 
     private func handleGetScreen(payload: IPCRequest.GetScreenPayload) -> IPCResponse {
         let result: Result<IPCResponse.ResponseData, IPCError> = performOnMain { [weak self] in
-            guard self != nil else { throw IPCError.appUnavailable }
+            guard let self else { throw IPCError.appUnavailable }
 
             // Find the surface by ID
-            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
                 throw IPCError.surfaceNotFound
             }
 
@@ -464,10 +464,10 @@ class IPCSocketServer {
 
     private func handleFocusSurface(payload: IPCRequest.FocusSurfacePayload) -> IPCResponse {
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
-            guard self != nil else { throw IPCError.appUnavailable }
+            guard let self else { throw IPCError.appUnavailable }
 
             // Find the surface by ID
-            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
                 throw IPCError.surfaceNotFound
             }
 
@@ -493,10 +493,10 @@ class IPCSocketServer {
 
     private func handleCloseSurface(payload: IPCRequest.CloseSurfacePayload) -> IPCResponse {
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
-            guard self != nil else { throw IPCError.appUnavailable }
+            guard let self else { throw IPCError.appUnavailable }
 
             // Find the surface by ID
-            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
                 throw IPCError.surfaceNotFound
             }
 
@@ -519,10 +519,10 @@ class IPCSocketServer {
 
     private func handleResizeSurface(payload: IPCRequest.ResizeSurfacePayload) -> IPCResponse {
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
-            guard self != nil else { throw IPCError.appUnavailable }
+            guard let self else { throw IPCError.appUnavailable }
 
             // Find the surface by ID
-            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
                 throw IPCError.surfaceNotFound
             }
 
@@ -559,10 +559,16 @@ class IPCSocketServer {
 
     private func handleScreenshotSurface(payload: IPCRequest.ScreenshotSurfacePayload) -> IPCResponse {
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
-            guard self != nil else { throw IPCError.appUnavailable }
+            guard let self else { throw IPCError.appUnavailable }
+
+            // Validate output path - reject paths with traversal attempts
+            let outputPath = payload.output_path
+            guard !outputPath.contains("..") else {
+                throw IPCError.invalidArguments
+            }
 
             // Find the surface by ID
-            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
                 throw IPCError.surfaceNotFound
             }
 
@@ -579,8 +585,8 @@ class IPCSocketServer {
                 throw IPCError.screenshotFailed
             }
 
-            // Write to file
-            let url = URL(fileURLWithPath: payload.output_path)
+            // Write to file - use standardized URL to resolve any remaining path issues
+            let url = URL(fileURLWithPath: outputPath).standardized
             try pngData.write(to: url)
         }
 
@@ -940,7 +946,7 @@ struct IPCResponse: Encodable {
 
 // MARK: - Errors
 
-enum IPCError: Error {
+enum IPCError: LocalizedError {
     case socketCreationFailed(Int32)
     case bindFailed(Int32)
     case listenFailed(Int32)
@@ -958,7 +964,7 @@ enum IPCError: Error {
         return .appUnavailable
     }
 
-    var localizedDescription: String {
+    var errorDescription: String? {
         switch self {
         case .socketCreationFailed(let e):
             return "Socket creation failed (errno=\(e))"

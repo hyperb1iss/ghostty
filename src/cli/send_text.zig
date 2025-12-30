@@ -65,7 +65,7 @@ pub const Options = struct {
     /// The surface ID to send text to.
     surface: ?[:0]const u8 = null,
 
-    /// Text to send (can also be provided as positional argument).
+    /// Text to send.
     text: ?[:0]const u8 = null,
 
     pub fn deinit(self: *Options) void {
@@ -93,16 +93,17 @@ pub const Options = struct {
 ///   * `--surface=<id>`: The surface ID to send text to (required).
 ///       Get surface IDs from `+list-surfaces`.
 ///
-///   * `--text=<text>`: The text to send. Can also be provided as a
-///       positional argument.
+///   * `--text=<text>`: The text to send. Supports escape sequences:
+///       \n (newline), \r (carriage return), \t (tab), \\ (backslash),
+///       \e (escape), \xNN (hex byte).
 ///
 /// Examples:
 ///
 ///   Send "hello" to a surface:
-///     ghostty +send-text --surface=0x153872000 "hello"
+///     ghostty +send-text --surface=0x153872000 --text="hello"
 ///
-///   Send a command with newline:
-///     ghostty +send-text --surface=0x153872000 "ls -la\n"
+///   Send a command and execute it (with carriage return):
+///     ghostty +send-text --surface=0x153872000 --text="ls -la\r"
 ///
 /// Available since: 1.4.0
 pub fn run(alloc: Allocator) !u8 {
@@ -113,7 +114,7 @@ pub fn run(alloc: Allocator) !u8 {
     var stderr_writer = std.fs.File.stderr().writer(&buffer);
     const stderr = &stderr_writer.interface;
 
-    const result = runArgs(alloc, &iter, stderr);
+    const result = try runArgs(alloc, &iter, stderr);
     stderr.flush() catch {};
     return result;
 }

@@ -147,6 +147,17 @@ pub const Options = struct {
 ///     execute inside the first surface of the new window instead of the
 ///     default command.
 ///
+/// Examples:
+///
+///   Open a new window in the running Ghostty instance:
+///     ghostty +new-window
+///
+///   Open a window running a specific command:
+///     ghostty +new-window -e htop
+///
+///   Open a window in a custom Ghostty instance:
+///     ghostty +new-window --class=com.mitchellh.ghostty-debug
+///
 /// Available since: 1.2.0
 pub fn run(alloc: Allocator) !u8 {
     var iter = try args.argsIterator(alloc);
@@ -156,7 +167,7 @@ pub fn run(alloc: Allocator) !u8 {
     var stderr_writer = std.fs.File.stderr().writer(&buffer);
     const stderr = &stderr_writer.interface;
 
-    const result = runArgs(alloc, &iter, stderr);
+    const result = try runArgs(alloc, &iter, stderr);
     stderr.flush() catch {};
     return result;
 }

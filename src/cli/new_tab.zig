@@ -97,6 +97,17 @@ pub const Options = struct {
 ///   * `-e`: Any arguments after this will be interpreted as a command to
 ///     execute inside the new tab instead of the default command.
 ///
+/// Examples:
+///
+///   Open a new tab in the running Ghostty instance:
+///     ghostty +new-tab
+///
+///   Open a tab running a specific command:
+///     ghostty +new-tab -e htop
+///
+///   Open a tab in a custom Ghostty instance:
+///     ghostty +new-tab --class=com.mitchellh.ghostty-debug
+///
 /// Available since: 1.3.0
 pub fn run(alloc: Allocator) !u8 {
     var iter = try args.argsIterator(alloc);
@@ -106,7 +117,7 @@ pub fn run(alloc: Allocator) !u8 {
     var stderr_writer = std.fs.File.stderr().writer(&buffer);
     const stderr = &stderr_writer.interface;
 
-    const result = runArgs(alloc, &iter, stderr);
+    const result = try runArgs(alloc, &iter, stderr);
     stderr.flush() catch {};
     return result;
 }

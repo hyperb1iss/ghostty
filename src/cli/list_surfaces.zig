@@ -41,6 +41,14 @@ pub const Options = struct {
 ///     - `text` (default): Human-readable tree output
 ///     - `json`: JSON output for scripting
 ///
+/// Examples:
+///
+///   List all surfaces in text format:
+///     ghostty +list-surfaces
+///
+///   Get JSON output for scripting:
+///     ghostty +list-surfaces --format=json
+///
 /// Available since: 1.4.0
 pub fn run(alloc: Allocator) !u8 {
     var iter = try args.argsIterator(alloc);
@@ -50,7 +58,7 @@ pub fn run(alloc: Allocator) !u8 {
     var stderr_writer = std.fs.File.stderr().writer(&buffer);
     const stderr = &stderr_writer.interface;
 
-    const result = runArgs(alloc, &iter, stderr);
+    const result = try runArgs(alloc, &iter, stderr);
     stderr.flush() catch {};
     return result;
 }

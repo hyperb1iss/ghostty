@@ -59,7 +59,7 @@ pub fn run(alloc: Allocator) !u8 {
     var stderr_writer = std.fs.File.stderr().writer(&buffer);
     const stderr = &stderr_writer.interface;
 
-    const result = runArgs(alloc, &iter, stderr);
+    const result = try runArgs(alloc, &iter, stderr);
     stderr.flush() catch {};
     return result;
 }

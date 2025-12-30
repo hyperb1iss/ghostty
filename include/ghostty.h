@@ -1012,7 +1012,7 @@ typedef union {
 typedef struct {
   ghostty_ipc_target_tag_e tag;
   ghostty_ipc_target_u target;
-} chostty_ipc_target_s;
+} ghostty_ipc_target_s;
 
 // apprt.ipc.Action.NewWindow
 typedef struct {
