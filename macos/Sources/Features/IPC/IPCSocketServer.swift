@@ -233,6 +233,8 @@ class IPCSocketServer {
                 return handleListSurfaces()
             case .send_text(let payload):
                 return handleSendText(payload: payload)
+            case .get_screen(let payload):
+                return handleGetScreen(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -393,6 +395,60 @@ class IPCSocketServer {
         switch result {
         case .success:
             return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
+    private func handleGetScreen(payload: IPCRequest.GetScreenPayload) -> IPCResponse {
+        let result: Result<IPCResponse.ResponseData, IPCError> = performOnMain { [weak self] in
+            guard self != nil else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            guard let surfaceC = surface.surface else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Get screen content using the C API
+            let screenType = payload.screen ?? "viewport"
+            let content: String = MainActor.assumeIsolated {
+                let result = ghostty_surface_get_screen_content(
+                    surfaceC,
+                    screenType,
+                    UInt(screenType.utf8.count)
+                )
+
+                // Convert ghostty_string_s to Swift String
+                if let ptr = result.ptr {
+                    let str = String(cString: ptr)
+                    // Free the string (it was allocated by Zig)
+                    ghostty_string_free(result)
+                    return str
+                }
+                return ""
+            }
+
+            // Get cursor position
+            let cursorPos: UInt32 = MainActor.assumeIsolated {
+                ghostty_surface_get_cursor_position(surfaceC)
+            }
+            let cursorX = (cursorPos >> 16) & 0xFFFF
+            let cursorY = cursorPos & 0xFFFF
+
+            return IPCResponse.ResponseData(
+                content: content,
+                cursor_x: cursorX,
+                cursor_y: cursorY
+            )
+        }
+
+        switch result {
+        case .success(let data):
+            return IPCResponse(ok: true, data: data)
         case .failure(let err):
             return IPCResponse(ok: false, error: err.localizedDescription)
         }
@@ -591,12 +647,14 @@ struct IPCRequest: Decodable {
         case new_tab(NewTabPayload?)
         case list_surfaces
         case send_text(SendTextPayload)
+        case get_screen(GetScreenPayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
             case new_tab
             case list_surfaces
             case send_text
+            case get_screen
         }
 
         init(from decoder: Decoder) throws {
@@ -613,6 +671,9 @@ struct IPCRequest: Decodable {
             } else if container.contains(.send_text) {
                 let payload = try container.decode(SendTextPayload.self, forKey: .send_text)
                 self = .send_text(payload)
+            } else if container.contains(.get_screen) {
+                let payload = try container.decode(GetScreenPayload.self, forKey: .get_screen)
+                self = .get_screen(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -636,6 +697,11 @@ struct IPCRequest: Decodable {
         let surface_id: String
         let text: String
     }
+
+    struct GetScreenPayload: Decodable {
+        let surface_id: String
+        let screen: String?
+    }
 }
 
 /// IPC response matching the Zig protocol.
@@ -653,10 +719,22 @@ struct IPCResponse: Encodable {
     struct ResponseData: Encodable {
         let id: String?
         let windows: [WindowInfo]?
+        let content: String?
+        let cursor_x: UInt32?
+        let cursor_y: UInt32?
 
-        init(id: String? = nil, windows: [WindowInfo]? = nil) {
+        init(
+            id: String? = nil,
+            windows: [WindowInfo]? = nil,
+            content: String? = nil,
+            cursor_x: UInt32? = nil,
+            cursor_y: UInt32? = nil
+        ) {
             self.id = id
             self.windows = windows
+            self.content = content
+            self.cursor_x = cursor_x
+            self.cursor_y = cursor_y
         }
     }
 

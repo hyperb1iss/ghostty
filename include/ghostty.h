@@ -1032,10 +1032,17 @@ typedef struct {
   const char *text;
 } ghostty_ipc_action_send_text_s;
 
+// apprt.ipc.Action.GetScreen
+typedef struct {
+  const char *surface_id;
+  const char *screen;
+} ghostty_ipc_action_get_screen_s;
+
 typedef union {
   ghostty_ipc_action_new_window_s new_window;
   ghostty_ipc_action_new_tab_s new_tab;
   ghostty_ipc_action_send_text_s send_text;
+  ghostty_ipc_action_get_screen_s get_screen;
 } ghostty_ipc_action_u;
 
 // apprt.ipc.Action.Key
@@ -1044,6 +1051,7 @@ typedef enum {
   GHOSTTY_IPC_ACTION_NEW_TAB,
   GHOSTTY_IPC_ACTION_LIST_SURFACES,
   GHOSTTY_IPC_ACTION_SEND_TEXT,
+  GHOSTTY_IPC_ACTION_GET_SCREEN,
 } ghostty_ipc_action_tag_e;
 
 //-------------------------------------------------------------------
@@ -1114,6 +1122,8 @@ bool ghostty_surface_key_is_binding(ghostty_surface_t,
                                     ghostty_binding_flags_e*);
 void ghostty_surface_text(ghostty_surface_t, const char*, uintptr_t);
 void ghostty_surface_write_raw(ghostty_surface_t, const char*, uintptr_t);
+ghostty_string_s ghostty_surface_get_screen_content(ghostty_surface_t, const char*, uintptr_t);
+uint32_t ghostty_surface_get_cursor_position(ghostty_surface_t);
 void ghostty_surface_preedit(ghostty_surface_t, const char*, uintptr_t);
 bool ghostty_surface_mouse_captured(ghostty_surface_t);
 bool ghostty_surface_mouse_button(ghostty_surface_t,

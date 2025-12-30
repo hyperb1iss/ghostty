@@ -55,6 +55,7 @@ pub const Request = struct {
         new_tab: NewTabPayload,
         list_surfaces: void,
         send_text: SendTextPayload,
+        get_screen: GetScreenPayload,
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -71,6 +72,13 @@ pub const Request = struct {
             surface_id: []const u8,
             /// The text to send.
             text: []const u8,
+        };
+
+        pub const GetScreenPayload = struct {
+            /// The surface ID to read from.
+            surface_id: []const u8,
+            /// Which screen portion: "viewport", "active", or "screen".
+            screen: []const u8 = "viewport",
         };
     };
 };
@@ -92,6 +100,13 @@ pub const Response = struct {
 
         /// List of windows (for list_surfaces action).
         windows: ?[]const Window = null,
+
+        /// Screen content (for get_screen action).
+        content: ?[]const u8 = null,
+
+        /// Cursor position (for get_screen action).
+        cursor_x: ?u32 = null,
+        cursor_y: ?u32 = null,
     };
 
     /// Window in list_surfaces response.
@@ -205,6 +220,12 @@ pub fn serializeRequest(
                 .send_text = .{
                     .surface_id = std.mem.sliceTo(value.surface_id, 0),
                     .text = std.mem.sliceTo(value.text, 0),
+                },
+            },
+            .get_screen => .{
+                .get_screen = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .screen = std.mem.sliceTo(value.screen, 0),
                 },
             },
         },

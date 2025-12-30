@@ -3275,6 +3275,56 @@ pub fn writeRaw(self: *Surface, data: []const u8) !void {
     ), .unlocked);
 }
 
+/// Get the screen content as a string.
+///
+/// The `screen_type` parameter specifies which portion of the screen to read:
+/// - "viewport": Currently visible content
+/// - "active": Active screen area (no scrollback)
+/// - "screen": Full screen including scrollback
+///
+/// Returns the allocated string content. Caller owns the memory.
+pub fn getScreenContent(
+    self: *Surface,
+    alloc: Allocator,
+    screen_type: []const u8,
+) ![]const u8 {
+    // Crash metadata in case we crash in here
+    crash.sentry.thread_state = self.crashThreadState();
+    defer crash.sentry.thread_state = null;
+
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    const point_tag: terminal.point.Tag = if (std.mem.eql(u8, screen_type, "viewport"))
+        .viewport
+    else if (std.mem.eql(u8, screen_type, "active"))
+        .active
+    else if (std.mem.eql(u8, screen_type, "screen"))
+        .screen
+    else
+        return error.InvalidScreenType;
+
+    const pt: terminal.point.Point = switch (point_tag) {
+        .viewport => .{ .viewport = .{} },
+        .active => .{ .active = .{} },
+        .screen => .{ .screen = .{} },
+        .history => .{ .history = .{} },
+    };
+
+    return try self.io.terminal.screens.active.dumpStringAlloc(alloc, pt);
+}
+
+/// Get the current cursor position.
+pub fn getCursorPosition(self: *Surface) struct { x: u16, y: u16 } {
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    return .{
+        .x = self.io.terminal.screens.active.cursor.x,
+        .y = self.io.terminal.screens.active.cursor.y,
+    };
+}
+
 /// Callback for when the surface is fully visible or not, regardless
 /// of focus state. This is used to pause rendering when the surface
 /// is not visible, and also re-render when it becomes visible again.

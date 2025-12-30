@@ -82,6 +82,32 @@ pub const Action = union(enum) {
     /// Send text to a specific surface.
     send_text: SendText,
 
+    /// Get the screen content from a specific surface.
+    get_screen: GetScreen,
+
+    pub const GetScreen = struct {
+        /// The surface ID to read from (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// Which portion of the screen to read.
+        /// - "viewport": Currently visible content
+        /// - "active": Active screen area (no scrollback)
+        /// - "screen": Full screen including scrollback
+        screen: [:0]const u8,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            screen: [*:0]const u8,
+        };
+
+        pub fn cval(self: GetScreen) GetScreen.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .screen = self.screen.ptr,
+            };
+        }
+    };
+
     pub const SendText = struct {
         /// The surface ID to send text to (from list_surfaces).
         surface_id: [:0]const u8,
@@ -182,6 +208,7 @@ pub const Action = union(enum) {
         new_tab,
         list_surfaces,
         send_text,
+        get_screen,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");

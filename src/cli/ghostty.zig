@@ -22,6 +22,7 @@ const new_window = @import("new_window.zig");
 const new_tab = @import("new_tab.zig");
 const list_surfaces = @import("list_surfaces.zig");
 const send_text = @import("send_text.zig");
+const get_screen = @import("get_screen.zig");
 
 /// Special commands that can be invoked via CLI flags. These are all
 /// invoked by using `+<action>` as a CLI flag. The only exception is
@@ -80,6 +81,9 @@ pub const Action = enum {
 
     // Use IPC to send text to a specific surface.
     @"send-text",
+
+    // Use IPC to read screen content from a specific surface.
+    @"get-screen",
 
     pub fn detectSpecialCase(arg: []const u8) ?SpecialCase(Action) {
         // If we see a "-e" and we haven't seen a command yet, then
@@ -162,6 +166,7 @@ pub const Action = enum {
             .@"new-tab" => try new_tab.run(alloc),
             .@"list-surfaces" => try list_surfaces.run(alloc),
             .@"send-text" => try send_text.run(alloc),
+            .@"get-screen" => try get_screen.run(alloc),
         };
     }
 
@@ -204,6 +209,7 @@ pub const Action = enum {
                 .@"new-tab" => new_tab.Options,
                 .@"list-surfaces" => list_surfaces.Options,
                 .@"send-text" => send_text.Options,
+                .@"get-screen" => get_screen.Options,
             };
         }
     }

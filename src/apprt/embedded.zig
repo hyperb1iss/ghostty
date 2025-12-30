@@ -20,6 +20,7 @@ const CoreInspector = @import("../inspector/main.zig").Inspector;
 const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
+const main_c = @import("../main_c.zig");
 
 const log = std.log.scoped(.embedded_window);
 
@@ -1817,6 +1818,34 @@ pub const CAPI = struct {
             log.err("error in writeRaw err={}", .{err});
             return;
         };
+    }
+
+    /// Get the screen content from a surface.
+    ///
+    /// The `screen_type` parameter specifies which portion to read:
+    /// - "viewport": Currently visible content
+    /// - "active": Active screen area (no scrollback)
+    /// - "screen": Full screen including scrollback
+    ///
+    /// Returns a String with the content. Caller must free with ghostty_string_free.
+    export fn ghostty_surface_get_screen_content(
+        surface: *Surface,
+        screen_type_ptr: [*]const u8,
+        screen_type_len: usize,
+    ) main_c.String {
+        const screen_type = screen_type_ptr[0..screen_type_len];
+        const content = surface.core_surface.getScreenContent(global.alloc, screen_type) catch |err| {
+            log.err("error getting screen content err={}", .{err});
+            return main_c.String.empty;
+        };
+        return main_c.String.fromSlice(content);
+    }
+
+    /// Get the cursor position from a surface.
+    /// Returns the x and y coordinates packed as (x << 16) | y.
+    export fn ghostty_surface_get_cursor_position(surface: *Surface) u32 {
+        const pos = surface.core_surface.getCursorPosition();
+        return (@as(u32, pos.x) << 16) | @as(u32, pos.y);
     }
 
     /// Set the preedit text for the surface. This is used for IME
