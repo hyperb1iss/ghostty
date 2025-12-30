@@ -1038,11 +1038,17 @@ typedef struct {
   const char *screen;
 } ghostty_ipc_action_get_screen_s;
 
+// apprt.ipc.Action.FocusSurface
+typedef struct {
+  const char *surface_id;
+} ghostty_ipc_action_focus_surface_s;
+
 typedef union {
   ghostty_ipc_action_new_window_s new_window;
   ghostty_ipc_action_new_tab_s new_tab;
   ghostty_ipc_action_send_text_s send_text;
   ghostty_ipc_action_get_screen_s get_screen;
+  ghostty_ipc_action_focus_surface_s focus_surface;
 } ghostty_ipc_action_u;
 
 // apprt.ipc.Action.Key
@@ -1052,6 +1058,7 @@ typedef enum {
   GHOSTTY_IPC_ACTION_LIST_SURFACES,
   GHOSTTY_IPC_ACTION_SEND_TEXT,
   GHOSTTY_IPC_ACTION_GET_SCREEN,
+  GHOSTTY_IPC_ACTION_FOCUS_SURFACE,
 } ghostty_ipc_action_tag_e;
 
 //-------------------------------------------------------------------

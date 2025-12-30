@@ -85,6 +85,24 @@ pub const Action = union(enum) {
     /// Get the screen content from a specific surface.
     get_screen: GetScreen,
 
+    /// Focus a specific surface (bring window to front).
+    focus_surface: FocusSurface,
+
+    pub const FocusSurface = struct {
+        /// The surface ID to focus (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+        };
+
+        pub fn cval(self: FocusSurface) FocusSurface.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+            };
+        }
+    };
+
     pub const GetScreen = struct {
         /// The surface ID to read from (from list_surfaces).
         surface_id: [:0]const u8,
@@ -209,6 +227,7 @@ pub const Action = union(enum) {
         list_surfaces,
         send_text,
         get_screen,
+        focus_surface,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");

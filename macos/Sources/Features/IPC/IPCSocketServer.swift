@@ -235,6 +235,8 @@ class IPCSocketServer {
                 return handleSendText(payload: payload)
             case .get_screen(let payload):
                 return handleGetScreen(payload: payload)
+            case .focus_surface(let payload):
+                return handleFocusSurface(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -454,6 +456,35 @@ class IPCSocketServer {
         }
     }
 
+    private func handleFocusSurface(payload: IPCRequest.FocusSurfacePayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard self != nil else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self?.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Find the window containing this surface and bring it to front
+            if let window = surface.window {
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+
+                // Focus the specific surface within the window
+                if let controller = window.windowController as? TerminalController {
+                    controller.focusSurface(surface)
+                }
+            }
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
     /// Find a surface by its hex ID (e.g., "0x153872000")
     private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
         for window in NSApp.windows {
@@ -648,6 +679,7 @@ struct IPCRequest: Decodable {
         case list_surfaces
         case send_text(SendTextPayload)
         case get_screen(GetScreenPayload)
+        case focus_surface(FocusSurfacePayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
@@ -655,6 +687,7 @@ struct IPCRequest: Decodable {
             case list_surfaces
             case send_text
             case get_screen
+            case focus_surface
         }
 
         init(from decoder: Decoder) throws {
@@ -674,6 +707,9 @@ struct IPCRequest: Decodable {
             } else if container.contains(.get_screen) {
                 let payload = try container.decode(GetScreenPayload.self, forKey: .get_screen)
                 self = .get_screen(payload)
+            } else if container.contains(.focus_surface) {
+                let payload = try container.decode(FocusSurfacePayload.self, forKey: .focus_surface)
+                self = .focus_surface(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -701,6 +737,10 @@ struct IPCRequest: Decodable {
     struct GetScreenPayload: Decodable {
         let surface_id: String
         let screen: String?
+    }
+
+    struct FocusSurfacePayload: Decodable {
+        let surface_id: String
     }
 }
 
