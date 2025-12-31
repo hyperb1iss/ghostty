@@ -61,6 +61,18 @@ pub const Request = struct {
         resize_surface: ResizeSurfacePayload,
         screenshot_surface: ScreenshotSurfacePayload,
         send_mouse: SendMousePayload,
+        send_scroll: SendScrollPayload,
+
+        pub const SendScrollPayload = struct {
+            /// The surface ID to send the scroll event to.
+            surface_id: []const u8,
+            /// Horizontal scroll delta.
+            x: f64 = 0,
+            /// Vertical scroll delta.
+            y: f64 = 0,
+            /// Modifier keys: comma-separated "shift", "ctrl", "alt", "super".
+            mods: ?[]const u8 = null,
+        };
 
         pub const SendMousePayload = struct {
             /// The surface ID to send the mouse event to.
@@ -304,6 +316,14 @@ pub fn serializeRequest(
                     .y = value.y,
                     .button = if (value.button) |b| std.mem.sliceTo(b, 0) else null,
                     .button_action = if (value.button_action) |a| std.mem.sliceTo(a, 0) else null,
+                    .mods = if (value.mods) |m| std.mem.sliceTo(m, 0) else null,
+                },
+            },
+            .send_scroll => .{
+                .send_scroll = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .x = value.x,
+                    .y = value.y,
                     .mods = if (value.mods) |m| std.mem.sliceTo(m, 0) else null,
                 },
             },

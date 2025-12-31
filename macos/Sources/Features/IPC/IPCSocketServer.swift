@@ -255,6 +255,10 @@ class IPCSocketServer {
                 return handleResizeSurface(payload: payload)
             case .screenshot_surface(let payload):
                 return handleScreenshotSurface(payload: payload)
+            case .send_mouse(let payload):
+                return handleSendMouse(payload: payload)
+            case .send_scroll(let payload):
+                return handleSendScroll(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -622,6 +626,113 @@ class IPCSocketServer {
         }
     }
 
+    private func handleSendMouse(payload: IPCRequest.SendMousePayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard let self else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            guard let surfaceModel = surface.surfaceModel else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Parse modifiers
+            var mods: Ghostty.Input.Mods = []
+            if let modsStr = payload.mods {
+                for mod in modsStr.lowercased().split(separator: ",") {
+                    switch mod.trimmingCharacters(in: .whitespaces) {
+                    case "shift": mods.insert(.shift)
+                    case "ctrl", "control": mods.insert(.ctrl)
+                    case "alt", "option": mods.insert(.alt)
+                    case "super", "cmd", "command": mods.insert(.super)
+                    default: break
+                    }
+                }
+            }
+
+            // Send mouse position first
+            let posEvent = Ghostty.Input.MousePosEvent(
+                x: payload.x,
+                y: payload.y,
+                mods: mods
+            )
+            MainActor.assumeIsolated {
+                surfaceModel.sendMousePos(posEvent)
+            }
+
+            // If button is specified, send button event
+            if let buttonStr = payload.button, let actionStr = payload.button_action {
+                // Parse button
+                let button: Ghostty.Input.MouseButton
+                switch buttonStr.lowercased() {
+                case "left": button = .left
+                case "right": button = .right
+                case "middle": button = .middle
+                default: button = .unknown
+                }
+
+                // Parse action
+                let action: Ghostty.Input.MouseState
+                switch actionStr.lowercased() {
+                case "press": action = .press
+                case "release": action = .release
+                default: throw IPCError.invalidArguments
+                }
+
+                let buttonEvent = Ghostty.Input.MouseButtonEvent(
+                    action: action,
+                    button: button,
+                    mods: mods
+                )
+                MainActor.assumeIsolated {
+                    surfaceModel.sendMouseButton(buttonEvent)
+                }
+            }
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
+    private func handleSendScroll(payload: IPCRequest.SendScrollPayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard let self else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            guard let surfaceModel = surface.surfaceModel else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Send scroll event (no precision/momentum for IPC-triggered scrolls)
+            let scrollEvent = Ghostty.Input.MouseScrollEvent(
+                x: payload.x,
+                y: payload.y,
+                mods: .init(rawValue: 0)
+            )
+            MainActor.assumeIsolated {
+                surfaceModel.sendMouseScroll(scrollEvent)
+            }
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
     /// Find a surface by its hex ID (e.g., "0x153872000")
     private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
         for window in NSApp.windows {
@@ -820,6 +931,8 @@ struct IPCRequest: Decodable {
         case close_surface(CloseSurfacePayload)
         case resize_surface(ResizeSurfacePayload)
         case screenshot_surface(ScreenshotSurfacePayload)
+        case send_mouse(SendMousePayload)
+        case send_scroll(SendScrollPayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
@@ -831,6 +944,8 @@ struct IPCRequest: Decodable {
             case close_surface
             case resize_surface
             case screenshot_surface
+            case send_mouse
+            case send_scroll
         }
 
         init(from decoder: Decoder) throws {
@@ -862,6 +977,12 @@ struct IPCRequest: Decodable {
             } else if container.contains(.screenshot_surface) {
                 let payload = try container.decode(ScreenshotSurfacePayload.self, forKey: .screenshot_surface)
                 self = .screenshot_surface(payload)
+            } else if container.contains(.send_mouse) {
+                let payload = try container.decode(SendMousePayload.self, forKey: .send_mouse)
+                self = .send_mouse(payload)
+            } else if container.contains(.send_scroll) {
+                let payload = try container.decode(SendScrollPayload.self, forKey: .send_scroll)
+                self = .send_scroll(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -908,6 +1029,22 @@ struct IPCRequest: Decodable {
     struct ScreenshotSurfacePayload: Decodable {
         let surface_id: String
         let output_path: String
+    }
+
+    struct SendMousePayload: Decodable {
+        let surface_id: String
+        let x: Double
+        let y: Double
+        let button: String?
+        let button_action: String?
+        let mods: String?
+    }
+
+    struct SendScrollPayload: Decodable {
+        let surface_id: String
+        let x: Double
+        let y: Double
+        let mods: String?
     }
 }
 

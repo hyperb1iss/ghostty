@@ -44,6 +44,7 @@ Tips:
 - Use action="read" to see what's on screen before sending commands
 - Use action="send" with text="command" and execute=true to run commands
 - Use action="mouse" with x, y, button="left", button_action="press"/"release" for clicks
+- Use action="scroll" with scroll_y=-3 to scroll up, scroll_y=3 to scroll down
 - Use action="screenshot" to capture terminal state as an image
 - Use text_b64 for exact byte sequences (e.g., control characters, binary data)
 """,
@@ -56,6 +57,7 @@ class TerminalAction(str, Enum):
     READ = "read"  # Get screen content
     SEND = "send"  # Send text/keystrokes
     MOUSE = "mouse"  # Send mouse event
+    SCROLL = "scroll"  # Send scroll event
     SCREENSHOT = "screenshot"  # Capture as PNG
     FOCUS = "focus"  # Bring window to front
     CLOSE = "close"  # Close the terminal
@@ -111,6 +113,8 @@ async def terminal(
     button: str | None = None,
     button_action: str | None = None,
     mods: str | None = None,
+    scroll_x: float | None = None,
+    scroll_y: float | None = None,
 ) -> str:
     """Interact with a Ghostty terminal.
 
@@ -118,6 +122,7 @@ async def terminal(
     - read: Get screen content (requires surface_id)
     - send: Send text to terminal (requires surface_id, text or text_b64)
     - mouse: Send mouse event (requires surface_id, x, y; optional button, button_action, mods)
+    - scroll: Send scroll event (requires surface_id; scroll_x and/or scroll_y for deltas)
     - screenshot: Capture terminal as PNG (requires surface_id, output_path)
     - focus: Bring terminal window to front (requires surface_id)
     - close: Close the terminal (requires surface_id)
@@ -142,6 +147,8 @@ async def terminal(
         button: Mouse button - "left", "right", "middle". If None, motion-only event.
         button_action: "press" or "release". Required if button is set.
         mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super"
+        scroll_x: Horizontal scroll delta (for "scroll" action). Positive = right.
+        scroll_y: Vertical scroll delta (for "scroll" action). Positive = down/up varies by app.
 
     Returns:
         JSON response with result or error.
@@ -190,6 +197,18 @@ async def terminal(
                         "y": y,
                         "button": button,
                         "button_action": button_action,
+                    })
+
+                case TerminalAction.SCROLL:
+                    if not surface_id:
+                        return json.dumps({"error": "surface_id required for scroll action"})
+                    sx = scroll_x if scroll_x is not None else 0.0
+                    sy = scroll_y if scroll_y is not None else 0.0
+                    await client.send_scroll(surface_id, sx, sy, mods)
+                    return json.dumps({
+                        "ok": True,
+                        "scroll_x": sx,
+                        "scroll_y": sy,
                     })
 
                 case TerminalAction.SCREENSHOT:

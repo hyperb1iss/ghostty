@@ -100,6 +100,39 @@ pub const Action = union(enum) {
     /// Send a mouse event to a surface.
     send_mouse: SendMouse,
 
+    /// Send a scroll event to a surface.
+    send_scroll: SendScroll,
+
+    pub const SendScroll = struct {
+        /// The surface ID to send the scroll event to (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// Horizontal scroll delta (positive = right, negative = left).
+        x: f64 = 0,
+
+        /// Vertical scroll delta (positive = down, negative = up).
+        y: f64 = 0,
+
+        /// Modifier keys: comma-separated list of "shift", "ctrl", "alt", "super".
+        mods: ?[:0]const u8 = null,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            x: f64,
+            y: f64,
+            mods: ?[*:0]const u8,
+        };
+
+        pub fn cval(self: SendScroll) SendScroll.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .x = self.x,
+                .y = self.y,
+                .mods = if (self.mods) |m| m.ptr else null,
+            };
+        }
+    };
+
     pub const SendMouse = struct {
         /// The surface ID to send the mouse event to (from list_surfaces).
         surface_id: [:0]const u8,
@@ -345,6 +378,7 @@ pub const Action = union(enum) {
         resize_surface,
         screenshot_surface,
         send_mouse,
+        send_scroll,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");

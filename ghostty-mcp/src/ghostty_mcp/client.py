@@ -365,6 +365,26 @@ class GhosttyClient:
         self.send_mouse(surface_id, x, y, button, "press", mods)
         self.send_mouse(surface_id, x, y, button, "release", mods)
 
+    def send_scroll(
+        self,
+        surface_id: str,
+        x: float = 0.0,
+        y: float = 0.0,
+        mods: str | None = None,
+    ) -> None:
+        """Send a scroll event to a surface.
+
+        Args:
+            surface_id: Target surface ID.
+            x: Horizontal scroll delta (positive = right).
+            y: Vertical scroll delta (positive = down, but apps may interpret differently).
+            mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super".
+        """
+        payload: dict[str, Any] = {"surface_id": surface_id, "x": x, "y": y}
+        if mods is not None:
+            payload["mods"] = mods
+        self._send_request("send_scroll", payload)
+
 
 # =============================================================================
 # Async Client
@@ -573,3 +593,23 @@ class AsyncGhosttyClient:
         """
         await self.send_mouse(surface_id, x, y, button, "press", mods)
         await self.send_mouse(surface_id, x, y, button, "release", mods)
+
+    async def send_scroll(
+        self,
+        surface_id: str,
+        x: float = 0.0,
+        y: float = 0.0,
+        mods: str | None = None,
+    ) -> None:
+        """Send a scroll event to a surface.
+
+        Args:
+            surface_id: Target surface ID.
+            x: Horizontal scroll delta (positive = right).
+            y: Vertical scroll delta (positive = down, but apps may interpret differently).
+            mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super".
+        """
+        payload: dict[str, Any] = {"surface_id": surface_id, "x": x, "y": y}
+        if mods is not None:
+            payload["mods"] = mods
+        await self._send_request("send_scroll", payload)
