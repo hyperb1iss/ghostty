@@ -189,6 +189,18 @@ class IPCSocketServer {
         defer { close(clientFD) }
 
         setNoSigPipe(clientFD)
+
+        // Ensure client socket is in blocking mode (it should be, but be explicit)
+        let flags = fcntl(clientFD, F_GETFL)
+        if flags != -1 && (flags & O_NONBLOCK) != 0 {
+            _ = fcntl(clientFD, F_SETFL, flags & ~O_NONBLOCK)
+        }
+
+        // Set read/write timeout to prevent indefinite blocking
+        var timeout = timeval(tv_sec: 10, tv_usec: 0)
+        setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(clientFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
         guard validatePeerIsSameUser(clientFD) else { return }
 
         do {
@@ -312,9 +324,15 @@ class IPCSocketServer {
             guard let self = self else { throw IPCError.appUnavailable }
 
             var windows: [IPCResponse.WindowInfo] = []
+            var processedWindows = Set<ObjectIdentifier>()
 
             // Iterate over all terminal windows
             for window in NSApp.windows {
+                // Skip windows we've already processed (via tab groups)
+                guard !processedWindows.contains(ObjectIdentifier(window)) else {
+                    continue
+                }
+
                 guard let controller = window.windowController as? TerminalController else {
                     continue
                 }
@@ -326,6 +344,11 @@ class IPCSocketServer {
 
                 // Get tabs from the window's tab group
                 if let tabGroup = window.tabGroup {
+                    // Mark all windows in this tab group as processed
+                    for tabWindow in tabGroup.windows {
+                        processedWindows.insert(ObjectIdentifier(tabWindow))
+                    }
+
                     for (tabIndex, tabWindow) in tabGroup.windows.enumerated() {
                         guard let tabController = tabWindow.windowController as? TerminalController else {
                             continue
@@ -348,6 +371,7 @@ class IPCSocketServer {
                     }
                 } else {
                     // Single-tab window
+                    processedWindows.insert(ObjectIdentifier(window))
                     let tabId = "\(windowId):0"
                     var surfaces: [IPCResponse.SurfaceInfo] = []
 
@@ -731,7 +755,7 @@ class IPCSocketServer {
                     return
                 }
                 if n < 0 {
-                    if errno == EINTR { continue }
+                    if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK { continue }
                     readError = .readFailed(errno)
                     return
                 }
@@ -749,7 +773,7 @@ class IPCSocketServer {
             let n = send(fd, bytes.advanced(by: totalSent), count - totalSent, 0)
             if n == 0 { throw IPCError.connectionClosed }
             if n < 0 {
-                if errno == EINTR { continue }
+                if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK { continue }
                 throw IPCError.sendFailed(errno)
             }
             totalSent += n
