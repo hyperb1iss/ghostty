@@ -45,54 +45,78 @@ Interact with a specific terminal. Actions:
 
 1. **Discover terminals** with `mcp__ghostty__terminals`
 2. **Read current state** with `action="read"` to see what's on screen
-3. **Send commands** with `action="send"`
+3. **Send commands** with `action="send"` and `execute=true`
 4. **Verify results** by reading again or taking a screenshot
 
 ## Sending Text
 
-### Simple commands
+### Running commands (the easy way)
 
-Use the `text` parameter with `\r` for Enter:
+Use `text` with `execute=true` to run commands — it appends Enter automatically:
 
 ```
-text: "ls -la\r"
+action: "send"
+surface_id: "0x..."
+text: "ls -la"
+execute: true
 ```
 
-### Complex text (code, special chars)
+### Typing without executing
 
-Use `text_b64` for base64-encoded content to avoid escape issues:
+Omit `execute` or set it to `false` to just type text without pressing Enter:
 
-```bash
-# Compute base64 first
-base64 -i /path/to/script.py
+```
+action: "send"
+surface_id: "0x..."
+text: "partial command"
 ```
 
-Then send via `text_b64` parameter.
+### Exact byte sequences
 
-### Special keys
+Use `text_b64` for base64-encoded content when you need precise control:
 
-- `\r` - Enter/Return
-- `\x1b` - Escape (for vim normal mode)
-- `\t` - Tab
+```
+action: "send"
+surface_id: "0x..."
+text_b64: "bHMgLWxhDQ=="  # "ls -la\r"
+```
+
+**Important:** The `text` parameter is sent as-is (no escape processing). Use `text_b64` for control characters like `\x1b` (Escape), `\r` (Enter), `\t` (Tab).
 
 ## Working with TUI Apps
 
 ### Neovim
 
-When typing code into Neovim:
+For pasting code into Neovim, use **bracketed paste mode**:
 
-1. Send `:set paste\r` first to disable auto-indent
-2. Enter insert mode with `i`
-3. Send content via `text_b64` (prevents escape mangling)
-4. Exit with `\x1b` then save with `:wq\r`
+1. Enter insert mode: `i`
+2. Send bracketed paste start: `\x1b[200~`
+3. Send content
+4. Send bracketed paste end: `\x1b[201~`
+5. Escape and save: `\x1b:wq\r`
 
-Example flow:
+Example with base64 (combine all in one send):
+```
+# Base64 of: i + \x1b[200~ + code + \x1b[201~
+text_b64: "aRtbMjAwfnByaW50KCJoZWxsbyIpG1syMDF+"
+```
+
+Then save:
+```
+text_b64: "Gzp3cQo="  # \x1b:wq\n
+```
+
+### htop, btop, lazygit
+
+These work great — just launch them and read the screen:
 
 ```
-send: ":set paste\ri"           # paste mode + insert
-send (text_b64): <base64 code>  # the actual content
-send: "\x1bGdd:wq\r"            # esc, go to end, delete blank line, save
+action: "send"
+text: "htop"
+execute: true
 ```
+
+Then read to see process list, or send keys like `q` to quit.
 
 ### Interactive prompts
 
@@ -100,7 +124,16 @@ Read the screen first to understand state, then respond appropriately.
 
 ## Screenshots
 
-Capture terminal state as PNG:
+Capture terminal state as PNG for visual verification or sharing.
+
+### When to use screenshots
+
+- **Complex TUI state**: htop, nvim, lazygit — text reads can be messy
+- **Verification**: Confirm a UI looks right after operations
+- **Debugging**: See exactly what the user sees
+- **Visual diffs**: Compare before/after states
+
+### How to capture
 
 ```
 action: "screenshot"
@@ -108,25 +141,54 @@ surface_id: "0x..."
 output_path: "/tmp/capture.png"
 ```
 
-Then use the Read tool to view the image.
+### Viewing the screenshot
+
+Use the Read tool on the path to view the image:
+
+```
+Read tool: /tmp/capture.png
+```
+
+Claude can see and analyze the terminal screenshot directly.
+
+## Python Client
+
+For scripting, use the async client directly:
+
+```python
+from ghostty_mcp import AsyncGhosttyClient
+
+async with AsyncGhosttyClient() as ghostty:
+    surfaces = await ghostty.list_surfaces()
+    for s in surfaces:
+        print(f"{s.title} ({s.rows}x{s.cols})")
+
+    # Send a command
+    await ghostty.send_text(surfaces[0].id, "echo hello\r")
+
+    # Read screen
+    content = await ghostty.get_screen(surfaces[0].id)
+    print(content.text)
+```
+
+A sync client (`GhosttyClient`) is also available.
 
 ## Tips
 
 - **Always discover first**: Call `terminals` before assuming surface IDs
 - **Read before sending**: Check screen state to understand context
-- **Use base64 for code**: Prevents JSON escape sequence corruption
-- **Set paste in vim**: Avoids auto-indent disasters
+- **Use execute=true for commands**: Cleaner than manually adding `\r`
+- **Use text_b64 for control chars**: Escape, tabs, special keys
+- **Bracketed paste for TUIs**: Prevents input mangling in editors
 - **Screenshot for verification**: Visual confirmation of complex operations
 
 ## Example: Write and Run a Script
 
 ```
-1. terminals                          # Get surface ID
-2. send: "nvim /tmp/demo.py\r"        # Open editor
-3. send: ":set paste\ri"              # Paste mode + insert
-4. bash: base64 -i script.py          # Get encoded content
-5. send (text_b64): <base64>          # Type the code
-6. send: "\x1bGdd:wq\r"               # Save and exit
-7. send: "python /tmp/demo.py\r"      # Run it
-8. screenshot                         # Capture the magic
+1. terminals                              # Get surface ID
+2. send: text="nvim /tmp/demo.py" execute=true
+3. send (text_b64): i + bracketed_paste_start + code + bracketed_paste_end
+4. send (text_b64): Esc + :wq + Enter
+5. send: text="python /tmp/demo.py" execute=true
+6. read                                   # See the output
 ```
