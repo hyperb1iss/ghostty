@@ -5,7 +5,8 @@ description = "MCP server and Python API for Ghostty terminal automation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "fastmcp>=0.4.0",
+    "fastmcp>=2.14",
+    "anyio>=4.0",
 ]
 
 [dependency-groups]

@@ -24,7 +24,7 @@ from enum import Enum
 
 from fastmcp import FastMCP
 
-from ghostty_mcp.client import GhosttyClient, GhosttyError
+from ghostty_mcp.client import AsyncGhosttyClient, GhosttyError
 
 # Create the MCP server
 mcp = FastMCP(
@@ -42,8 +42,9 @@ specific terminals for commands.
 
 Tips:
 - Use action="read" to see what's on screen before sending commands
-- Use action="send" with text ending in "\\r" to execute commands
+- Use action="send" with text="command" and execute=true to run commands
 - Use action="screenshot" to capture terminal state as an image
+- Use text_b64 for exact byte sequences (e.g., control characters, binary data)
 """,
 )
 
@@ -61,15 +62,8 @@ class TerminalAction(str, Enum):
     NEW_WINDOW = "new_window"  # Open new window
 
 
-def _get_client() -> GhosttyClient:
-    """Get a connected Ghostty client."""
-    client = GhosttyClient()
-    client.connect()
-    return client
-
-
 @mcp.tool()
-def terminals() -> str:
+async def terminals() -> str:
     """List all Ghostty terminal surfaces.
 
     Returns a list of all open terminals with their IDs, titles, dimensions,
@@ -80,8 +74,8 @@ def terminals() -> str:
         JSON array of terminal surfaces with id, title, rows, cols, focused, pwd.
     """
     try:
-        with GhosttyClient() as client:
-            surfaces = client.list_surfaces()
+        async with AsyncGhosttyClient() as client:
+            surfaces = await client.list_surfaces()
             result = [
                 {
                     "id": s.id,
@@ -99,11 +93,12 @@ def terminals() -> str:
 
 
 @mcp.tool()
-def terminal(
+async def terminal(
     action: TerminalAction,
     surface_id: str | None = None,
     text: str | None = None,
     text_b64: str | None = None,
+    execute: bool = False,
     screen_type: str = "viewport",
     output_path: str | None = None,
     rows: int | None = None,
@@ -125,9 +120,10 @@ def terminal(
     Args:
         action: The action to perform
         surface_id: Target terminal ID (from `terminals` tool). Required for most actions.
-        text: Text to send (for "send" action). Use \\r for Enter, \\n for newline.
-        text_b64: Base64-encoded text to send (for "send" action). Use this for exact byte
-            sequences without escape processing. Takes precedence over text.
+        text: Text to send (for "send" action). Sent as-is to the terminal.
+        text_b64: Base64-encoded text to send (for "send" action). Use for exact byte
+            sequences. Takes precedence over text.
+        execute: If True, append Enter (carriage return) after text to run as command.
         screen_type: "viewport" for visible content, "screen" for full scrollback
         output_path: Path to save screenshot PNG (for "screenshot" action)
         rows: Number of rows (for "resize" action)
@@ -138,12 +134,12 @@ def terminal(
         JSON response with result or error.
     """
     try:
-        with GhosttyClient() as client:
+        async with AsyncGhosttyClient() as client:
             match action:
                 case TerminalAction.READ:
                     if not surface_id:
                         return json.dumps({"error": "surface_id required for read action"})
-                    content = client.get_screen(surface_id, screen_type)
+                    content = await client.get_screen(surface_id, screen_type)
                     return json.dumps(
                         {
                             "content": content.text,
@@ -156,14 +152,16 @@ def terminal(
                     if not surface_id:
                         return json.dumps({"error": "surface_id required for send action"})
                     if text_b64:
-                        # Base64 mode: decode and send raw bytes (no escape processing)
+                        # Base64 mode: decode and send exact bytes
                         decoded = base64.b64decode(text_b64).decode("utf-8")
-                        client.send_text_raw(surface_id, decoded)
+                        if execute:
+                            decoded += "\r"
+                        await client.send_text(surface_id, decoded)
                         return json.dumps({"ok": True, "sent_b64": True, "length": len(decoded)})
                     elif text:
-                        # Legacy mode: process escape sequences
-                        client.send_text(surface_id, text)
-                        return json.dumps({"ok": True, "sent": text})
+                        to_send = text + "\r" if execute else text
+                        await client.send_text(surface_id, to_send)
+                        return json.dumps({"ok": True, "sent": text, "executed": execute})
                     else:
                         return json.dumps({"error": "text or text_b64 required for send action"})
 
@@ -172,19 +170,19 @@ def terminal(
                         return json.dumps({"error": "surface_id required for screenshot action"})
                     if not output_path:
                         return json.dumps({"error": "output_path required for screenshot action"})
-                    path = client.screenshot(surface_id, output_path)
+                    path = await client.screenshot(surface_id, output_path)
                     return json.dumps({"ok": True, "path": str(path)})
 
                 case TerminalAction.FOCUS:
                     if not surface_id:
                         return json.dumps({"error": "surface_id required for focus action"})
-                    client.focus_surface(surface_id)
+                    await client.focus_surface(surface_id)
                     return json.dumps({"ok": True})
 
                 case TerminalAction.CLOSE:
                     if not surface_id:
                         return json.dumps({"error": "surface_id required for close action"})
-                    client.close_surface(surface_id)
+                    await client.close_surface(surface_id)
                     return json.dumps({"ok": True})
 
                 case TerminalAction.RESIZE:
@@ -192,15 +190,15 @@ def terminal(
                         return json.dumps({"error": "surface_id required for resize action"})
                     if rows is None and cols is None:
                         return json.dumps({"error": "rows and/or cols required for resize action"})
-                    client.resize_surface(surface_id, rows, cols)
+                    await client.resize_surface(surface_id, rows, cols)
                     return json.dumps({"ok": True, "rows": rows, "cols": cols})
 
                 case TerminalAction.NEW_TAB:
-                    client.new_tab(command)
+                    await client.new_tab(command)
                     return json.dumps({"ok": True, "action": "new_tab"})
 
                 case TerminalAction.NEW_WINDOW:
-                    client.new_window(command)
+                    await client.new_window(command)
                     return json.dumps({"ok": True, "action": "new_window"})
 
                 case _:
