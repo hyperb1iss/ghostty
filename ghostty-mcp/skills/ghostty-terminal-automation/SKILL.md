@@ -34,6 +34,7 @@ Interact with a specific terminal. Actions:
 | ------------ | ---------------------------------- | -------------------------------------- |
 | `read`       | `surface_id`                       | Get screen content and cursor position |
 | `send`       | `surface_id`, `text` or `text_b64` | Send text/keystrokes                   |
+| `mouse`      | `surface_id`, `x`, `y`             | Send mouse event (click, move, drag)   |
 | `screenshot` | `surface_id`, `output_path`        | Capture terminal as PNG                |
 | `focus`      | `surface_id`                       | Bring window to front                  |
 | `close`      | `surface_id`                       | Close the terminal                     |
@@ -122,6 +123,75 @@ Then read to see process list, or send keys like `q` to quit.
 
 Read the screen first to understand state, then respond appropriately.
 
+## Mouse Events
+
+Many TUI apps support mouse interaction. The `mouse` action lets you click, drag, and hover.
+
+### Clicking
+
+Send a click (press + release) at pixel coordinates:
+
+```
+action: "mouse"
+surface_id: "0x..."
+x: 100
+y: 200
+button: "left"
+button_action: "press"
+```
+
+Then immediately:
+
+```
+action: "mouse"
+surface_id: "0x..."
+x: 100
+y: 200
+button: "left"
+button_action: "release"
+```
+
+### Available buttons
+
+- `left`, `right`, `middle`
+- `four`, `five` (extra mouse buttons)
+
+### Motion events
+
+Omit `button` to send a motion-only event (for hover effects):
+
+```
+action: "mouse"
+surface_id: "0x..."
+x: 150
+y: 250
+```
+
+### Modifiers
+
+Add `mods` for modified clicks (comma-separated):
+
+```
+action: "mouse"
+surface_id: "0x..."
+x: 100
+y: 200
+button: "left"
+button_action: "press"
+mods: "ctrl,shift"
+```
+
+### Dragging
+
+Simulate drag by sending:
+1. `press` at start position
+2. Multiple motion events along the path
+3. `release` at end position
+
+### Coordinates
+
+Coordinates are in **pixels** relative to the terminal surface origin (top-left = 0,0). To click on a specific cell, calculate: `x = col * cell_width`, `y = row * cell_height`.
+
 ## Screenshots
 
 Capture terminal state as PNG for visual verification or sharing.
@@ -169,6 +239,13 @@ async with AsyncGhosttyClient() as ghostty:
     # Read screen
     content = await ghostty.get_screen(surfaces[0].id)
     print(content.text)
+
+    # Click at position (convenience method does press + release)
+    await ghostty.click(surfaces[0].id, x=100, y=200)
+
+    # Or send individual mouse events
+    await ghostty.send_mouse(surfaces[0].id, x=100, y=200, button="left", button_action="press")
+    await ghostty.send_mouse(surfaces[0].id, x=100, y=200, button="left", button_action="release")
 ```
 
 A sync client (`GhosttyClient`) is also available.

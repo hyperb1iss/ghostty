@@ -316,6 +316,55 @@ class GhosttyClient:
         """Run a shell command in a surface (sends command + Enter)."""
         self.send_text(surface_id, command + "\r")
 
+    def send_mouse(
+        self,
+        surface_id: str,
+        x: float,
+        y: float,
+        button: str | None = None,
+        button_action: str | None = None,
+        mods: str | None = None,
+    ) -> None:
+        """Send a mouse event to a surface.
+
+        Args:
+            surface_id: Target surface ID.
+            x: X position in pixels (relative to surface origin).
+            y: Y position in pixels (relative to surface origin).
+            button: Mouse button - "left", "right", "middle", "four", "five", etc.
+                    If None, sends a motion-only event.
+            button_action: "press" or "release". Required if button is set.
+            mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super".
+        """
+        payload: dict[str, Any] = {"surface_id": surface_id, "x": x, "y": y}
+        if button is not None:
+            payload["button"] = button
+        if button_action is not None:
+            payload["button_action"] = button_action
+        if mods is not None:
+            payload["mods"] = mods
+        self._send_request("send_mouse", payload)
+
+    def click(
+        self,
+        surface_id: str,
+        x: float,
+        y: float,
+        button: str = "left",
+        mods: str | None = None,
+    ) -> None:
+        """Click at a position (press + release).
+
+        Args:
+            surface_id: Target surface ID.
+            x: X position in pixels.
+            y: Y position in pixels.
+            button: Mouse button (default: "left").
+            mods: Comma-separated modifiers.
+        """
+        self.send_mouse(surface_id, x, y, button, "press", mods)
+        self.send_mouse(surface_id, x, y, button, "release", mods)
+
 
 # =============================================================================
 # Async Client
@@ -475,3 +524,52 @@ class AsyncGhosttyClient:
     async def run_command(self, surface_id: str, command: str) -> None:
         """Run a shell command in a surface (sends command + Enter)."""
         await self.send_text(surface_id, command + "\r")
+
+    async def send_mouse(
+        self,
+        surface_id: str,
+        x: float,
+        y: float,
+        button: str | None = None,
+        button_action: str | None = None,
+        mods: str | None = None,
+    ) -> None:
+        """Send a mouse event to a surface.
+
+        Args:
+            surface_id: Target surface ID.
+            x: X position in pixels (relative to surface origin).
+            y: Y position in pixels (relative to surface origin).
+            button: Mouse button - "left", "right", "middle", "four", "five", etc.
+                    If None, sends a motion-only event.
+            button_action: "press" or "release". Required if button is set.
+            mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super".
+        """
+        payload: dict[str, Any] = {"surface_id": surface_id, "x": x, "y": y}
+        if button is not None:
+            payload["button"] = button
+        if button_action is not None:
+            payload["button_action"] = button_action
+        if mods is not None:
+            payload["mods"] = mods
+        await self._send_request("send_mouse", payload)
+
+    async def click(
+        self,
+        surface_id: str,
+        x: float,
+        y: float,
+        button: str = "left",
+        mods: str | None = None,
+    ) -> None:
+        """Click at a position (press + release).
+
+        Args:
+            surface_id: Target surface ID.
+            x: X position in pixels.
+            y: Y position in pixels.
+            button: Mouse button (default: "left").
+            mods: Comma-separated modifiers.
+        """
+        await self.send_mouse(surface_id, x, y, button, "press", mods)
+        await self.send_mouse(surface_id, x, y, button, "release", mods)

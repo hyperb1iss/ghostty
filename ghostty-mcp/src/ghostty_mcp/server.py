@@ -43,6 +43,7 @@ specific terminals for commands.
 Tips:
 - Use action="read" to see what's on screen before sending commands
 - Use action="send" with text="command" and execute=true to run commands
+- Use action="mouse" with x, y, button="left", button_action="press"/"release" for clicks
 - Use action="screenshot" to capture terminal state as an image
 - Use text_b64 for exact byte sequences (e.g., control characters, binary data)
 """,
@@ -54,6 +55,7 @@ class TerminalAction(str, Enum):
 
     READ = "read"  # Get screen content
     SEND = "send"  # Send text/keystrokes
+    MOUSE = "mouse"  # Send mouse event
     SCREENSHOT = "screenshot"  # Capture as PNG
     FOCUS = "focus"  # Bring window to front
     CLOSE = "close"  # Close the terminal
@@ -104,12 +106,18 @@ async def terminal(
     rows: int | None = None,
     cols: int | None = None,
     command: list[str] | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    button: str | None = None,
+    button_action: str | None = None,
+    mods: str | None = None,
 ) -> str:
     """Interact with a Ghostty terminal.
 
     Actions:
     - read: Get screen content (requires surface_id)
     - send: Send text to terminal (requires surface_id, text or text_b64)
+    - mouse: Send mouse event (requires surface_id, x, y; optional button, button_action, mods)
     - screenshot: Capture terminal as PNG (requires surface_id, output_path)
     - focus: Bring terminal window to front (requires surface_id)
     - close: Close the terminal (requires surface_id)
@@ -129,6 +137,11 @@ async def terminal(
         rows: Number of rows (for "resize" action)
         cols: Number of columns (for "resize" action)
         command: Command to run in new tab/window (for "new_tab"/"new_window" actions)
+        x: X position in pixels for mouse action
+        y: Y position in pixels for mouse action
+        button: Mouse button - "left", "right", "middle". If None, motion-only event.
+        button_action: "press" or "release". Required if button is set.
+        mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super"
 
     Returns:
         JSON response with result or error.
@@ -164,6 +177,20 @@ async def terminal(
                         return json.dumps({"ok": True, "sent": text, "executed": execute})
                     else:
                         return json.dumps({"error": "text or text_b64 required for send action"})
+
+                case TerminalAction.MOUSE:
+                    if not surface_id:
+                        return json.dumps({"error": "surface_id required for mouse action"})
+                    if x is None or y is None:
+                        return json.dumps({"error": "x and y required for mouse action"})
+                    await client.send_mouse(surface_id, x, y, button, button_action, mods)
+                    return json.dumps({
+                        "ok": True,
+                        "x": x,
+                        "y": y,
+                        "button": button,
+                        "button_action": button_action,
+                    })
 
                 case TerminalAction.SCREENSHOT:
                     if not surface_id:

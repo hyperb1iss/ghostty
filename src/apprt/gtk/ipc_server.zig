@@ -205,6 +205,7 @@ pub const Server = struct {
             .screenshot_surface => |p| ipc_handlers.screenshotSurface(self.app, p.surface_id, p.output_path),
             .new_window => |p| ipc_handlers.newWindow(self.app, if (p.arguments) |a| a else null),
             .new_tab => |p| ipc_handlers.newTab(self.app, if (p.arguments) |a| a else null),
+            .send_mouse => |p| ipc_handlers.sendMouse(self.app, p.surface_id, p.x, p.y, p.button, p.button_action, p.mods),
         };
     }
 

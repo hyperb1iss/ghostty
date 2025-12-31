@@ -97,6 +97,50 @@ pub const Action = union(enum) {
     /// Take a screenshot of a surface.
     screenshot_surface: ScreenshotSurface,
 
+    /// Send a mouse event to a surface.
+    send_mouse: SendMouse,
+
+    pub const SendMouse = struct {
+        /// The surface ID to send the mouse event to (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// X position in pixels (relative to surface origin).
+        x: f64,
+
+        /// Y position in pixels (relative to surface origin).
+        y: f64,
+
+        /// Mouse button: "left", "right", "middle", "four", "five", etc.
+        /// Optional for motion-only events.
+        button: ?[:0]const u8 = null,
+
+        /// Button action: "press" or "release". Required if button is set.
+        button_action: ?[:0]const u8 = null,
+
+        /// Modifier keys: comma-separated list of "shift", "ctrl", "alt", "super".
+        mods: ?[:0]const u8 = null,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            x: f64,
+            y: f64,
+            button: ?[*:0]const u8,
+            button_action: ?[*:0]const u8,
+            mods: ?[*:0]const u8,
+        };
+
+        pub fn cval(self: SendMouse) SendMouse.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .x = self.x,
+                .y = self.y,
+                .button = if (self.button) |b| b.ptr else null,
+                .button_action = if (self.button_action) |a| a.ptr else null,
+                .mods = if (self.mods) |m| m.ptr else null,
+            };
+        }
+    };
+
     pub const ScreenshotSurface = struct {
         /// The surface ID to screenshot (from list_surfaces).
         surface_id: [:0]const u8,
@@ -300,6 +344,7 @@ pub const Action = union(enum) {
         close_surface,
         resize_surface,
         screenshot_surface,
+        send_mouse,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");
@@ -345,8 +390,8 @@ pub const Action = union(enum) {
         // At the time of writing, we don't promise ABI compatibility
         // so we can change this but I want to be aware of it.
         assert(@sizeOf(CValue) == switch (@sizeOf(usize)) {
-            4 => 8,
-            8 => 16, // SendText has 2 pointers
+            4 => 32, // SendMouse.C: 4 ptr + 2*8 f64 + 3*4 ptr = 32
+            8 => 48, // SendMouse.C: 1*8 ptr + 2*8 f64 + 3*8 ptr = 48
             else => unreachable,
         });
     }

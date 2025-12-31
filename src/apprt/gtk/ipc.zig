@@ -12,6 +12,8 @@ const gdk = @import("gdk");
 const gobject = @import("gobject");
 const adw = @import("adw");
 
+const apprt = @import("../structs.zig");
+const input = @import("../../input.zig");
 const ipc = @import("../ipc/mod.zig");
 const socket = @import("../socket.zig");
 const Response = socket.Response;
@@ -75,6 +77,68 @@ pub fn sendText(app: *Application, surface_id: []const u8, text: []const u8) Res
     // Use writeRaw to bypass bracketed paste mode
     core.writeRaw(text) catch {
         return ipc.err("Failed to write to surface");
+    };
+
+    return ipc.success();
+}
+
+/// Send a mouse event to a surface.
+pub fn sendMouse(
+    app: *Application,
+    surface_id: []const u8,
+    x: f64,
+    y: f64,
+    button_str: ?[]const u8,
+    action_str: ?[]const u8,
+    mods_str: ?[]const u8,
+) Response {
+    _ = app;
+
+    const surface = findSurfaceById(surface_id) orelse {
+        return ipc.err("Surface not found");
+    };
+
+    const core = surface.core() orelse {
+        return ipc.err("Surface not initialized");
+    };
+
+    // Parse modifiers
+    const mods = parseMods(mods_str);
+
+    // Create cursor position
+    const pos: apprt.CursorPos = .{
+        .x = @floatCast(x),
+        .y = @floatCast(y),
+    };
+
+    // If no button specified, this is a motion event
+    if (button_str == null) {
+        core.cursorPosCallback(pos, mods) catch {
+            return ipc.err("Failed to process mouse motion");
+        };
+        return ipc.success();
+    }
+
+    // Parse button
+    const button = parseMouseButton(button_str.?) orelse {
+        return ipc.err("Invalid mouse button");
+    };
+
+    // Parse action (default to press if not specified)
+    const action: input.MouseButtonState = if (action_str) |a| blk: {
+        if (std.mem.eql(u8, a, "press")) break :blk .press;
+        if (std.mem.eql(u8, a, "release")) break :blk .release;
+        return ipc.err("Invalid button action (use 'press' or 'release')");
+    } else .press;
+
+    // Update cursor position first (mouse events need position context)
+    core.cursorPosCallback(pos, mods) catch {
+        return ipc.err("Failed to update cursor position");
+    };
+
+    // Send button event
+    _ = core.mouseButtonCallback(action, button, mods) catch {
+        return ipc.err("Failed to process mouse button");
     };
 
     return ipc.success();
@@ -343,4 +407,36 @@ fn collectTabs(window: *Window, tabs: *std.ArrayList(Response.Tab), alloc: Alloc
         .active = true,
         .surfaces = try surfaces.toOwnedSlice(),
     });
+}
+
+/// Parse a mouse button string to MouseButton enum.
+fn parseMouseButton(button_str: []const u8) ?input.MouseButton {
+    if (std.mem.eql(u8, button_str, "left")) return .left;
+    if (std.mem.eql(u8, button_str, "right")) return .right;
+    if (std.mem.eql(u8, button_str, "middle")) return .middle;
+    if (std.mem.eql(u8, button_str, "four")) return .four;
+    if (std.mem.eql(u8, button_str, "five")) return .five;
+    if (std.mem.eql(u8, button_str, "six")) return .six;
+    if (std.mem.eql(u8, button_str, "seven")) return .seven;
+    if (std.mem.eql(u8, button_str, "eight")) return .eight;
+    if (std.mem.eql(u8, button_str, "nine")) return .nine;
+    if (std.mem.eql(u8, button_str, "ten")) return .ten;
+    if (std.mem.eql(u8, button_str, "eleven")) return .eleven;
+    return null;
+}
+
+/// Parse modifier string to Mods struct.
+fn parseMods(mods_str: ?[]const u8) input.Mods {
+    var mods: input.Mods = .{};
+    const str = mods_str orelse return mods;
+
+    var iter = std.mem.tokenizeAny(u8, str, ", ");
+    while (iter.next()) |mod| {
+        const trimmed = std.mem.trim(u8, mod, " ");
+        if (std.mem.eql(u8, trimmed, "shift")) mods.shift = true;
+        if (std.mem.eql(u8, trimmed, "ctrl")) mods.ctrl = true;
+        if (std.mem.eql(u8, trimmed, "alt")) mods.alt = true;
+        if (std.mem.eql(u8, trimmed, "super")) mods.super = true;
+    }
+    return mods;
 }

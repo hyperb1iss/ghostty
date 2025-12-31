@@ -60,6 +60,22 @@ pub const Request = struct {
         close_surface: CloseSurfacePayload,
         resize_surface: ResizeSurfacePayload,
         screenshot_surface: ScreenshotSurfacePayload,
+        send_mouse: SendMousePayload,
+
+        pub const SendMousePayload = struct {
+            /// The surface ID to send the mouse event to.
+            surface_id: []const u8,
+            /// X position in pixels.
+            x: f64,
+            /// Y position in pixels.
+            y: f64,
+            /// Mouse button: "left", "right", "middle", etc.
+            button: ?[]const u8 = null,
+            /// Button action: "press" or "release".
+            button_action: ?[]const u8 = null,
+            /// Modifier keys: comma-separated "shift", "ctrl", "alt", "super".
+            mods: ?[]const u8 = null,
+        };
 
         pub const NewWindowPayload = struct {
             /// Command arguments to run in the new window.
@@ -279,6 +295,16 @@ pub fn serializeRequest(
                 .screenshot_surface = .{
                     .surface_id = std.mem.sliceTo(value.surface_id, 0),
                     .output_path = std.mem.sliceTo(value.output_path, 0),
+                },
+            },
+            .send_mouse => .{
+                .send_mouse = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .x = value.x,
+                    .y = value.y,
+                    .button = if (value.button) |b| std.mem.sliceTo(b, 0) else null,
+                    .button_action = if (value.button_action) |a| std.mem.sliceTo(a, 0) else null,
+                    .mods = if (value.mods) |m| std.mem.sliceTo(m, 0) else null,
                 },
             },
         },
