@@ -206,6 +206,8 @@ pub const Server = struct {
             .new_window => |p| ipc_handlers.newWindow(self.app, if (p.arguments) |a| a else null),
             .new_tab => |p| ipc_handlers.newTab(self.app, if (p.arguments) |a| a else null),
             .send_mouse => |p| ipc_handlers.sendMouse(self.app, p.surface_id, p.x, p.y, p.button, p.button_action, p.mods),
+            .send_scroll => |p| ipc_handlers.sendScroll(self.app, p.surface_id, p.x, p.y, p.mods),
+            .send_key => |p| ipc_handlers.sendKey(self.app, p.surface_id, p.key, p.action, p.mods),
         };
     }
 

@@ -56,6 +56,7 @@ class TerminalAction(str, Enum):
 
     READ = "read"  # Get screen content
     SEND = "send"  # Send text/keystrokes
+    KEY = "key"  # Send key event (W3C key codes)
     MOUSE = "mouse"  # Send mouse event
     SCROLL = "scroll"  # Send scroll event
     SCREENSHOT = "screenshot"  # Capture as PNG
@@ -115,12 +116,15 @@ async def terminal(
     mods: str | None = None,
     scroll_x: float | None = None,
     scroll_y: float | None = None,
+    key: str | None = None,
+    key_action: str | None = None,
 ) -> str:
     """Interact with a Ghostty terminal.
 
     Actions:
     - read: Get screen content (requires surface_id)
     - send: Send text to terminal (requires surface_id, text or text_b64)
+    - key: Send key event (requires surface_id, key; optional key_action, mods)
     - mouse: Send mouse event (requires surface_id, x, y; optional button, button_action, mods)
     - scroll: Send scroll event (requires surface_id; scroll_x and/or scroll_y for deltas)
     - screenshot: Capture terminal as PNG (requires surface_id, output_path)
@@ -149,6 +153,9 @@ async def terminal(
         mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super"
         scroll_x: Horizontal scroll delta (for "scroll" action). Positive = right.
         scroll_y: Vertical scroll delta (for "scroll" action). Positive = down/up varies by app.
+        key: Key name in W3C format (for "key" action). Examples: "Escape", "ArrowUp",
+            "KeyA", "Enter", "F1", "Backspace", "Tab".
+        key_action: "press", "release", or "repeat" (for "key" action). Default "press".
 
     Returns:
         JSON response with result or error.
@@ -184,6 +191,19 @@ async def terminal(
                         return json.dumps({"ok": True, "sent": text, "executed": execute})
                     else:
                         return json.dumps({"error": "text or text_b64 required for send action"})
+
+                case TerminalAction.KEY:
+                    if not surface_id:
+                        return json.dumps({"error": "surface_id required for key action"})
+                    if not key:
+                        return json.dumps({"error": "key required for key action"})
+                    await client.send_key(surface_id, key, key_action, mods)
+                    return json.dumps({
+                        "ok": True,
+                        "key": key,
+                        "key_action": key_action or "press",
+                        "mods": mods,
+                    })
 
                 case TerminalAction.MOUSE:
                     if not surface_id:

@@ -385,6 +385,45 @@ class GhosttyClient:
             payload["mods"] = mods
         self._send_request("send_scroll", payload)
 
+    def send_key(
+        self,
+        surface_id: str,
+        key: str,
+        action: str | None = None,
+        mods: str | None = None,
+    ) -> None:
+        """Send a key event to a surface.
+
+        Args:
+            surface_id: Target surface ID.
+            key: Key name in W3C format. Examples: "Escape", "ArrowUp", "KeyA",
+                 "Enter", "F1", "Backspace", "Tab", "Space".
+            action: "press", "release", or "repeat". Default is "press".
+            mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super".
+        """
+        payload: dict[str, Any] = {"surface_id": surface_id, "key": key}
+        if action is not None:
+            payload["action"] = action
+        if mods is not None:
+            payload["mods"] = mods
+        self._send_request("send_key", payload)
+
+    def press_key(
+        self,
+        surface_id: str,
+        key: str,
+        mods: str | None = None,
+    ) -> None:
+        """Press and release a key.
+
+        Args:
+            surface_id: Target surface ID.
+            key: Key name in W3C format.
+            mods: Comma-separated modifiers.
+        """
+        self.send_key(surface_id, key, "press", mods)
+        self.send_key(surface_id, key, "release", mods)
+
 
 # =============================================================================
 # Async Client
@@ -613,3 +652,42 @@ class AsyncGhosttyClient:
         if mods is not None:
             payload["mods"] = mods
         await self._send_request("send_scroll", payload)
+
+    async def send_key(
+        self,
+        surface_id: str,
+        key: str,
+        action: str | None = None,
+        mods: str | None = None,
+    ) -> None:
+        """Send a key event to a surface.
+
+        Args:
+            surface_id: Target surface ID.
+            key: Key name in W3C format. Examples: "Escape", "ArrowUp", "KeyA",
+                 "Enter", "F1", "Backspace", "Tab", "Space".
+            action: "press", "release", or "repeat". Default is "press".
+            mods: Comma-separated modifiers - "shift", "ctrl", "alt", "super".
+        """
+        payload: dict[str, Any] = {"surface_id": surface_id, "key": key}
+        if action is not None:
+            payload["action"] = action
+        if mods is not None:
+            payload["mods"] = mods
+        await self._send_request("send_key", payload)
+
+    async def press_key(
+        self,
+        surface_id: str,
+        key: str,
+        mods: str | None = None,
+    ) -> None:
+        """Press and release a key.
+
+        Args:
+            surface_id: Target surface ID.
+            key: Key name in W3C format.
+            mods: Comma-separated modifiers.
+        """
+        await self.send_key(surface_id, key, "press", mods)
+        await self.send_key(surface_id, key, "release", mods)

@@ -425,6 +425,91 @@ fn parseMouseButton(button_str: []const u8) ?input.MouseButton {
     return null;
 }
 
+/// Send a scroll event to a surface.
+pub fn sendScroll(
+    app: *Application,
+    surface_id: []const u8,
+    x: f64,
+    y: f64,
+    mods_str: ?[]const u8,
+) Response {
+    _ = app;
+    _ = mods_str; // TODO: modifiers not currently used for scroll
+
+    const surface = findSurfaceById(surface_id) orelse {
+        return ipc.err("Surface not found");
+    };
+
+    const core = surface.core() orelse {
+        return ipc.err("Surface not initialized");
+    };
+
+    // Send discrete scroll event (non-precision)
+    const scroll_mods: input.ScrollMods = .{
+        .precision = false,
+        .momentum = .none,
+    };
+
+    core.scrollCallback(x, y, scroll_mods) catch {
+        return ipc.err("Failed to process scroll event");
+    };
+
+    return ipc.success();
+}
+
+/// Send a key event to a surface.
+pub fn sendKey(
+    app: *Application,
+    surface_id: []const u8,
+    key_str: []const u8,
+    action_str: ?[]const u8,
+    mods_str: ?[]const u8,
+) Response {
+    _ = app;
+
+    const surface = findSurfaceById(surface_id) orelse {
+        return ipc.err("Surface not found");
+    };
+
+    const core = surface.core() orelse {
+        return ipc.err("Surface not initialized");
+    };
+
+    // Parse key using W3C key code format
+    const key = input.Key.fromW3C(key_str) orelse {
+        return ipc.err("Invalid key name");
+    };
+
+    // Parse action (default to press)
+    const action: input.Action = if (action_str) |a| blk: {
+        if (std.mem.eql(u8, a, "press")) break :blk .press;
+        if (std.mem.eql(u8, a, "release")) break :blk .release;
+        if (std.mem.eql(u8, a, "repeat")) break :blk .repeat;
+        return ipc.err("Invalid action (use 'press', 'release', or 'repeat')");
+    } else .press;
+
+    // Parse modifiers
+    const mods = parseMods(mods_str);
+
+    // Create key event
+    const event: input.KeyEvent = .{
+        .action = action,
+        .key = key,
+        .mods = mods,
+        .consumed_mods = .{},
+        .composing = false,
+        .utf8 = "",
+        .unshifted_codepoint = 0,
+    };
+
+    // Send key event
+    _ = core.keyCallback(event) catch {
+        return ipc.err("Failed to process key event");
+    };
+
+    return ipc.success();
+}
+
 /// Parse modifier string to Mods struct.
 fn parseMods(mods_str: ?[]const u8) input.Mods {
     var mods: input.Mods = .{};

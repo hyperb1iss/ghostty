@@ -103,6 +103,39 @@ pub const Action = union(enum) {
     /// Send a scroll event to a surface.
     send_scroll: SendScroll,
 
+    /// Send a key event to a surface.
+    send_key: SendKey,
+
+    pub const SendKey = struct {
+        /// The surface ID to send the key event to (from list_surfaces).
+        surface_id: [:0]const u8,
+
+        /// Key name in W3C format (e.g., "Escape", "ArrowUp", "KeyA", "Enter").
+        key: [:0]const u8,
+
+        /// Key action: "press", "release", or "repeat". Default is "press".
+        action: ?[:0]const u8 = null,
+
+        /// Modifier keys: comma-separated list of "shift", "ctrl", "alt", "super".
+        mods: ?[:0]const u8 = null,
+
+        pub const C = extern struct {
+            surface_id: [*:0]const u8,
+            key: [*:0]const u8,
+            action: ?[*:0]const u8,
+            mods: ?[*:0]const u8,
+        };
+
+        pub fn cval(self: SendKey) SendKey.C {
+            return .{
+                .surface_id = self.surface_id.ptr,
+                .key = self.key.ptr,
+                .action = if (self.action) |a| a.ptr else null,
+                .mods = if (self.mods) |m| m.ptr else null,
+            };
+        }
+    };
+
     pub const SendScroll = struct {
         /// The surface ID to send the scroll event to (from list_surfaces).
         surface_id: [:0]const u8,
@@ -379,6 +412,7 @@ pub const Action = union(enum) {
         screenshot_surface,
         send_mouse,
         send_scroll,
+        send_key,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_IPC_ACTION_");

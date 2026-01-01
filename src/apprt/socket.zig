@@ -62,6 +62,7 @@ pub const Request = struct {
         screenshot_surface: ScreenshotSurfacePayload,
         send_mouse: SendMousePayload,
         send_scroll: SendScrollPayload,
+        send_key: SendKeyPayload,
 
         pub const SendScrollPayload = struct {
             /// The surface ID to send the scroll event to.
@@ -70,6 +71,17 @@ pub const Request = struct {
             x: f64 = 0,
             /// Vertical scroll delta.
             y: f64 = 0,
+            /// Modifier keys: comma-separated "shift", "ctrl", "alt", "super".
+            mods: ?[]const u8 = null,
+        };
+
+        pub const SendKeyPayload = struct {
+            /// The surface ID to send the key event to.
+            surface_id: []const u8,
+            /// Key name in W3C format (e.g., "Escape", "ArrowUp", "KeyA").
+            key: []const u8,
+            /// Key action: "press", "release", or "repeat".
+            action: ?[]const u8 = null,
             /// Modifier keys: comma-separated "shift", "ctrl", "alt", "super".
             mods: ?[]const u8 = null,
         };
@@ -324,6 +336,14 @@ pub fn serializeRequest(
                     .surface_id = std.mem.sliceTo(value.surface_id, 0),
                     .x = value.x,
                     .y = value.y,
+                    .mods = if (value.mods) |m| std.mem.sliceTo(m, 0) else null,
+                },
+            },
+            .send_key => .{
+                .send_key = .{
+                    .surface_id = std.mem.sliceTo(value.surface_id, 0),
+                    .key = std.mem.sliceTo(value.key, 0),
+                    .action = if (value.action) |a| std.mem.sliceTo(a, 0) else null,
                     .mods = if (value.mods) |m| std.mem.sliceTo(m, 0) else null,
                 },
             },
