@@ -43,10 +43,15 @@ specific terminals for commands.
 Tips:
 - Use action="read" to see what's on screen before sending commands
 - Use action="send" with text="command" and execute=true to run commands
+- Use action="key" with key="Escape" for special keys (W3C key codes)
 - Use action="mouse" with x, y, button="left", button_action="press"/"release" for clicks
 - Use action="scroll" with scroll_y=-3 to scroll up, scroll_y=3 to scroll down
 - Use action="screenshot" to capture terminal state as an image
 - Use text_b64 for exact byte sequences (e.g., control characters, binary data)
+
+Common key names: Escape, Enter, Tab, Backspace, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+  F1-F12, Space, Home, End, PageUp, PageDown, Delete, Insert.
+  Letters: KeyA-KeyZ. Digits: Digit0-Digit9.
 """,
 )
 
