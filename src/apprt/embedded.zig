@@ -1841,11 +1841,73 @@ pub const CAPI = struct {
         return main_c.String.fromSlice(content);
     }
 
+    /// Get the screen cells with full styling information as JSON.
+    ///
+    /// The `screen_type` parameter specifies which portion to read:
+    /// - "viewport": Currently visible content
+    /// - "active": Active screen area (no scrollback)
+    /// - "screen": Full screen including scrollback
+    ///
+    /// Returns a String with JSON cell data including character, foreground/background
+    /// colors, and style flags (bold, italic, etc.). Caller must free with ghostty_string_free.
+    export fn ghostty_surface_get_screen_cells(
+        surface: *Surface,
+        screen_type_ptr: [*]const u8,
+        screen_type_len: usize,
+    ) main_c.String {
+        const screen_type = screen_type_ptr[0..screen_type_len];
+        const content = surface.core_surface.getScreenCells(global.alloc, screen_type) catch |err| {
+            log.err("error getting screen cells err={}", .{err});
+            return main_c.String.empty;
+        };
+        return main_c.String.fromSlice(content);
+    }
+
     /// Get the cursor position from a surface.
     /// Returns the x and y coordinates packed as (x << 16) | y.
     export fn ghostty_surface_get_cursor_position(surface: *Surface) u32 {
         const pos = surface.core_surface.getCursorPosition();
         return (@as(u32, pos.x) << 16) | @as(u32, pos.y);
+    }
+
+    /// Send a key event using a W3C key name string.
+    ///
+    /// This is useful for IPC automation where keys are specified as strings
+    /// like "Escape", "ArrowUp", "Enter", "KeyA", etc.
+    ///
+    /// Returns true if the key was processed successfully.
+    export fn ghostty_surface_send_key_from_string(
+        surface: *Surface,
+        action: input.Action,
+        mods: input.Mods,
+        key_ptr: [*:0]const u8,
+    ) bool {
+        const key_str = std.mem.sliceTo(key_ptr, 0);
+
+        // Parse the W3C key name
+        const key = input.Key.fromW3C(key_str) orelse {
+            log.warn("unknown W3C key name: {s}", .{key_str});
+            return false;
+        };
+
+        // Create a key event with minimal data for IPC automation
+        const event = input.KeyEvent{
+            .action = action,
+            .key = key,
+            .mods = mods,
+            .consumed_mods = .{},
+            .composing = false,
+            .utf8 = "",
+            .unshifted_codepoint = 0,
+        };
+
+        // Send the key callback
+        _ = surface.core_surface.keyCallback(event) catch |err| {
+            log.warn("error processing key event err={}", .{err});
+            return false;
+        };
+
+        return true;
     }
 
     /// Set the preedit text for the surface. This is used for IME

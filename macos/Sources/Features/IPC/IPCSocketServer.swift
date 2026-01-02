@@ -259,6 +259,8 @@ class IPCSocketServer {
                 return handleSendMouse(payload: payload)
             case .send_scroll(let payload):
                 return handleSendScroll(payload: payload)
+            case .send_key(let payload):
+                return handleSendKey(payload: payload)
             }
         } catch {
             logger.error("Failed to parse IPC request: \(error.localizedDescription)")
@@ -449,37 +451,64 @@ class IPCSocketServer {
                 throw IPCError.surfaceNotFound
             }
 
-            // Get screen content using the C API
             let screenType = payload.screen ?? "viewport"
-            let content: String = MainActor.assumeIsolated {
-                let result = ghostty_surface_get_screen_content(
-                    surfaceC,
-                    screenType,
-                    UInt(screenType.utf8.count)
-                )
+            let format = payload.format ?? "text"
 
-                // Convert ghostty_string_s to Swift String
-                if let ptr = result.ptr {
-                    let str = String(cString: ptr)
-                    // Free the string (it was allocated by Zig)
-                    ghostty_string_free(result)
-                    return str
+            if format == "cells" {
+                // Get structured cell data as JSON
+                let cellsJson: String = MainActor.assumeIsolated {
+                    let result = ghostty_surface_get_screen_cells(
+                        surfaceC,
+                        screenType,
+                        UInt(screenType.utf8.count)
+                    )
+
+                    if let ptr = result.ptr {
+                        let str = String(cString: ptr)
+                        ghostty_string_free(result)
+                        return str
+                    }
+                    return "{}"
                 }
-                return ""
-            }
 
-            // Get cursor position
-            let cursorPos: UInt32 = MainActor.assumeIsolated {
-                ghostty_surface_get_cursor_position(surfaceC)
-            }
-            let cursorX = (cursorPos >> 16) & 0xFFFF
-            let cursorY = cursorPos & 0xFFFF
+                // Return the cells JSON as content - the cells format includes cursor and size
+                return IPCResponse.ResponseData(
+                    content: cellsJson,
+                    cursor_x: nil,
+                    cursor_y: nil
+                )
+            } else {
+                // Get screen content using the C API (text format)
+                let content: String = MainActor.assumeIsolated {
+                    let result = ghostty_surface_get_screen_content(
+                        surfaceC,
+                        screenType,
+                        UInt(screenType.utf8.count)
+                    )
 
-            return IPCResponse.ResponseData(
-                content: content,
-                cursor_x: cursorX,
-                cursor_y: cursorY
-            )
+                    // Convert ghostty_string_s to Swift String
+                    if let ptr = result.ptr {
+                        let str = String(cString: ptr)
+                        // Free the string (it was allocated by Zig)
+                        ghostty_string_free(result)
+                        return str
+                    }
+                    return ""
+                }
+
+                // Get cursor position
+                let cursorPos: UInt32 = MainActor.assumeIsolated {
+                    ghostty_surface_get_cursor_position(surfaceC)
+                }
+                let cursorX = (cursorPos >> 16) & 0xFFFF
+                let cursorY = cursorPos & 0xFFFF
+
+                return IPCResponse.ResponseData(
+                    content: content,
+                    cursor_x: cursorX,
+                    cursor_y: cursorY
+                )
+            }
         }
 
         switch result {
@@ -733,6 +762,64 @@ class IPCSocketServer {
         }
     }
 
+    private func handleSendKey(payload: IPCRequest.SendKeyPayload) -> IPCResponse {
+        let result: Result<Void, IPCError> = performOnMain { [weak self] in
+            guard let self else { throw IPCError.appUnavailable }
+
+            // Find the surface by ID
+            guard let surface = self.findSurface(byId: payload.surface_id) else {
+                throw IPCError.surfaceNotFound
+            }
+
+            guard let surfaceC = surface.surface else {
+                throw IPCError.surfaceNotFound
+            }
+
+            // Parse action (default to press)
+            let actionStr = payload.action ?? "press"
+            let action: ghostty_input_action_e
+            switch actionStr.lowercased() {
+            case "press": action = GHOSTTY_ACTION_PRESS
+            case "release": action = GHOSTTY_ACTION_RELEASE
+            case "repeat": action = GHOSTTY_ACTION_REPEAT
+            default: throw IPCError.invalidArguments
+            }
+
+            // Parse modifiers
+            var mods = GHOSTTY_MODS_NONE
+            if let modsStr = payload.mods {
+                for mod in modsStr.lowercased().split(separator: ",") {
+                    switch mod.trimmingCharacters(in: .whitespaces) {
+                    case "shift": mods = ghostty_input_mods_e(rawValue: mods.rawValue | GHOSTTY_MODS_SHIFT.rawValue)
+                    case "ctrl", "control": mods = ghostty_input_mods_e(rawValue: mods.rawValue | GHOSTTY_MODS_CTRL.rawValue)
+                    case "alt", "option": mods = ghostty_input_mods_e(rawValue: mods.rawValue | GHOSTTY_MODS_ALT.rawValue)
+                    case "super", "cmd", "command": mods = ghostty_input_mods_e(rawValue: mods.rawValue | GHOSTTY_MODS_SUPER.rawValue)
+                    default: break
+                    }
+                }
+            }
+
+            // Use the Zig key parsing to convert W3C key name
+            MainActor.assumeIsolated {
+                payload.key.withCString { keyPtr in
+                    ghostty_surface_send_key_from_string(
+                        surfaceC,
+                        action,
+                        mods,
+                        keyPtr
+                    )
+                }
+            }
+        }
+
+        switch result {
+        case .success:
+            return IPCResponse(ok: true)
+        case .failure(let err):
+            return IPCResponse(ok: false, error: err.localizedDescription)
+        }
+    }
+
     /// Find a surface by its hex ID (e.g., "0x153872000")
     private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
         for window in NSApp.windows {
@@ -933,6 +1020,7 @@ struct IPCRequest: Decodable {
         case screenshot_surface(ScreenshotSurfacePayload)
         case send_mouse(SendMousePayload)
         case send_scroll(SendScrollPayload)
+        case send_key(SendKeyPayload)
 
         enum CodingKeys: String, CodingKey {
             case new_window
@@ -946,6 +1034,7 @@ struct IPCRequest: Decodable {
             case screenshot_surface
             case send_mouse
             case send_scroll
+            case send_key
         }
 
         init(from decoder: Decoder) throws {
@@ -983,6 +1072,9 @@ struct IPCRequest: Decodable {
             } else if container.contains(.send_scroll) {
                 let payload = try container.decode(SendScrollPayload.self, forKey: .send_scroll)
                 self = .send_scroll(payload)
+            } else if container.contains(.send_key) {
+                let payload = try container.decode(SendKeyPayload.self, forKey: .send_key)
+                self = .send_key(payload)
             } else {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
@@ -1010,6 +1102,7 @@ struct IPCRequest: Decodable {
     struct GetScreenPayload: Decodable {
         let surface_id: String
         let screen: String?
+        let format: String?  // "text" (default) or "cells"
     }
 
     struct FocusSurfacePayload: Decodable {
@@ -1044,6 +1137,13 @@ struct IPCRequest: Decodable {
         let surface_id: String
         let x: Double
         let y: Double
+        let mods: String?
+    }
+
+    struct SendKeyPayload: Decodable {
+        let surface_id: String
+        let key: String
+        let action: String?
         let mods: String?
     }
 }

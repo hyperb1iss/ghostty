@@ -3314,6 +3314,181 @@ pub fn getScreenContent(
     return try self.io.terminal.screens.active.dumpStringAlloc(alloc, pt);
 }
 
+/// Get the screen cells with full styling information as JSON.
+///
+/// The `screen_type` parameter specifies which portion of the screen to read:
+/// - "viewport": Currently visible content
+/// - "active": Active screen area (no scrollback)
+/// - "screen": Full screen including scrollback
+///
+/// Returns a JSON object with:
+/// - rows: array of row objects containing cells with char, fg, bg, and style flags
+/// - cursor: current cursor position {x, y}
+/// - size: terminal dimensions {rows, cols}
+///
+/// Caller owns the returned memory.
+pub fn getScreenCells(
+    self: *Surface,
+    alloc: Allocator,
+    screen_type: []const u8,
+) ![:0]const u8 {
+    // Crash metadata in case we crash in here
+    crash.sentry.thread_state = self.crashThreadState();
+    defer crash.sentry.thread_state = null;
+
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    const screen = self.io.terminal.screens.active;
+    const point_tag: terminal.point.Tag = if (std.mem.eql(u8, screen_type, "viewport"))
+        .viewport
+    else if (std.mem.eql(u8, screen_type, "active"))
+        .active
+    else if (std.mem.eql(u8, screen_type, "screen"))
+        .screen
+    else
+        return error.InvalidScreenType;
+
+    // Get the boundaries for iteration
+    const pt: terminal.point.Point = switch (point_tag) {
+        .viewport => .{ .viewport = .{} },
+        .active => .{ .active = .{} },
+        .screen => .{ .screen = .{} },
+        .history => .{ .history = .{} },
+    };
+
+    const tl = screen.pages.getTopLeft(pt);
+    const br = screen.pages.getBottomRight(pt) orelse return error.InvalidScreenType;
+
+    // Use an allocating writer to build the JSON output
+    var output: std.Io.Writer.Allocating = .init(alloc);
+    errdefer output.deinit();
+
+    const writer = &output.writer;
+
+    // Start JSON object
+    try writer.writeAll("{\"rows\":[");
+
+    var first_row = true;
+    var iter = tl.pageIterator(.right_down, br);
+    while (iter.next()) |chunk| {
+        const page = &chunk.node.data;
+
+        for (chunk.start..chunk.end) |y_usize| {
+            if (!first_row) try writer.writeAll(",");
+            first_row = false;
+
+            try writer.writeAll("{\"cells\":[");
+
+            const y: terminal.size.CellCountInt = @intCast(y_usize);
+            const row = page.getRow(y);
+            const row_cells = page.getCells(row);
+
+            var first_cell = true;
+            for (row_cells, 0..) |cell, x| {
+                // Skip spacer tails (second half of wide characters)
+                if (cell.wide == .spacer_tail) continue;
+
+                if (!first_cell) try writer.writeAll(",");
+                first_cell = false;
+
+                try writer.writeAll("{");
+
+                // Write character
+                const cp = cell.codepoint();
+                if (cp == 0) {
+                    try writer.writeAll("\"char\":\" \"");
+                } else if (cp == '"') {
+                    try writer.writeAll("\"char\":\"\\\"\"");
+                } else if (cp == '\\') {
+                    try writer.writeAll("\"char\":\"\\\\\"");
+                } else if (cp < 0x20 or cp == 0x7f) {
+                    // Control characters - use unicode escape
+                    try writer.print("\"char\":\"\\u{x:0>4}\"", .{cp});
+                } else {
+                    // Regular character - encode as UTF-8
+                    var buf: [4]u8 = undefined;
+                    const len = std.unicode.utf8Encode(cp, &buf) catch 1;
+                    try writer.writeAll("\"char\":\"");
+                    try writer.writeAll(buf[0..len]);
+                    try writer.writeAll("\"");
+                }
+
+                // Write column position
+                try writer.print(",\"x\":{d}", .{x});
+
+                // Write wide flag if applicable
+                if (cell.wide == .wide) {
+                    try writer.writeAll(",\"wide\":true");
+                }
+
+                // Get style if non-default
+                if (cell.style_id != terminal.style.default_id) {
+                    const style = page.styles.get(page.memory, cell.style_id);
+
+                    // Foreground color
+                    switch (style.fg_color) {
+                        .none => {},
+                        .palette => |idx| try writer.print(",\"fg\":{{\"palette\":{d}}}", .{idx}),
+                        .rgb => |rgb| try writer.print(",\"fg\":{{\"r\":{d},\"g\":{d},\"b\":{d}}}", .{ rgb.r, rgb.g, rgb.b }),
+                    }
+
+                    // Background color
+                    switch (style.bg_color) {
+                        .none => {},
+                        .palette => |idx| try writer.print(",\"bg\":{{\"palette\":{d}}}", .{idx}),
+                        .rgb => |rgb| try writer.print(",\"bg\":{{\"r\":{d},\"g\":{d},\"b\":{d}}}", .{ rgb.r, rgb.g, rgb.b }),
+                    }
+
+                    // Style flags
+                    if (style.flags.bold) try writer.writeAll(",\"bold\":true");
+                    if (style.flags.italic) try writer.writeAll(",\"italic\":true");
+                    if (style.flags.faint) try writer.writeAll(",\"faint\":true");
+                    if (style.flags.blink) try writer.writeAll(",\"blink\":true");
+                    if (style.flags.inverse) try writer.writeAll(",\"inverse\":true");
+                    if (style.flags.invisible) try writer.writeAll(",\"invisible\":true");
+                    if (style.flags.strikethrough) try writer.writeAll(",\"strikethrough\":true");
+                    if (style.flags.overline) try writer.writeAll(",\"overline\":true");
+                    if (style.flags.underline != .none) {
+                        try writer.print(",\"underline\":\"{s}\"", .{@tagName(style.flags.underline)});
+                    }
+                } else {
+                    // Check for background-only cells
+                    switch (cell.content_tag) {
+                        .bg_color_palette => {
+                            try writer.print(",\"bg\":{{\"palette\":{d}}}", .{cell.content.color_palette});
+                        },
+                        .bg_color_rgb => {
+                            const rgb = cell.content.color_rgb;
+                            try writer.print(",\"bg\":{{\"r\":{d},\"g\":{d},\"b\":{d}}}", .{ rgb.r, rgb.g, rgb.b });
+                        },
+                        else => {},
+                    }
+                }
+
+                try writer.writeAll("}");
+            }
+
+            try writer.writeAll("],\"wrap\":");
+            try writer.writeAll(if (row.wrap) "true" else "false");
+            try writer.writeAll("}");
+        }
+    }
+
+    // Close rows array, add cursor and size info
+    try writer.print("],\"cursor\":{{\"x\":{d},\"y\":{d}}}", .{
+        screen.cursor.x,
+        screen.cursor.y,
+    });
+
+    try writer.print(",\"size\":{{\"rows\":{d},\"cols\":{d}}}}}", .{
+        screen.pages.rows,
+        screen.pages.cols,
+    });
+
+    return try output.toOwnedSliceSentinel(0);
+}
+
 /// Get the current cursor position.
 pub fn getCursorPosition(self: *Surface) struct { x: u16, y: u16 } {
     self.renderer_state.mutex.lock();

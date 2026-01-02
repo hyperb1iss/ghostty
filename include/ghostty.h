@@ -1154,7 +1154,12 @@ bool ghostty_surface_key_is_binding(ghostty_surface_t,
 void ghostty_surface_text(ghostty_surface_t, const char*, uintptr_t);
 void ghostty_surface_write_raw(ghostty_surface_t, const char*, uintptr_t);
 ghostty_string_s ghostty_surface_get_screen_content(ghostty_surface_t, const char*, uintptr_t);
+ghostty_string_s ghostty_surface_get_screen_cells(ghostty_surface_t, const char*, uintptr_t);
 uint32_t ghostty_surface_get_cursor_position(ghostty_surface_t);
+bool ghostty_surface_send_key_from_string(ghostty_surface_t,
+                                          ghostty_input_action_e,
+                                          ghostty_input_mods_e,
+                                          const char*);
 void ghostty_surface_preedit(ghostty_surface_t, const char*, uintptr_t);
 bool ghostty_surface_mouse_captured(ghostty_surface_t);
 bool ghostty_surface_mouse_button(ghostty_surface_t,
