@@ -3326,6 +3326,9 @@ pub fn getScreenContent(
 /// - cursor: current cursor position {x, y}
 /// - size: terminal dimensions {rows, cols}
 ///
+/// Uses span-based encoding for efficiency: consecutive characters with the
+/// same style are grouped into spans. Empty trailing spans are omitted.
+///
 /// Caller owns the returned memory.
 pub fn getScreenCells(
     self: *Surface,
@@ -3366,10 +3369,14 @@ pub fn getScreenCells(
 
     const writer = &output.writer;
 
+    // Buffer for accumulating span text (max 4 bytes per char * max cols)
+    var span_buf: [4 * 1024]u8 = undefined;
+
     // Start JSON object
     try writer.writeAll("{\"rows\":[");
 
     var first_row = true;
+    var row_idx: usize = 0;
     var iter = tl.pageIterator(.right_down, br);
     while (iter.next()) |chunk| {
         const page = &chunk.node.data;
@@ -3378,100 +3385,95 @@ pub fn getScreenCells(
             if (!first_row) try writer.writeAll(",");
             first_row = false;
 
-            try writer.writeAll("{\"cells\":[");
-
             const y: terminal.size.CellCountInt = @intCast(y_usize);
             const row = page.getRow(y);
             const row_cells = page.getCells(row);
 
-            var first_cell = true;
+            // Collect spans for this row
+            try writer.writeAll("{\"spans\":[");
+
+            var first_span = true;
+            var span_start: usize = 0;
+            var span_len: usize = 0;
+            var span_style_id: terminal.style.Id = terminal.style.default_id;
+            var span_bg_palette: ?u8 = null;
+            var span_bg_rgb: ?terminal.page.Cell.RGB = null;
+
             for (row_cells, 0..) |cell, x| {
-                // Skip spacer tails (second half of wide characters)
+                // Skip spacer tails
                 if (cell.wide == .spacer_tail) continue;
 
-                if (!first_cell) try writer.writeAll(",");
-                first_cell = false;
+                // Determine cell's effective style
+                const cell_style_id = cell.style_id;
+                var cell_bg_palette: ?u8 = null;
+                var cell_bg_rgb: ?terminal.page.Cell.RGB = null;
 
-                try writer.writeAll("{");
-
-                // Write character
-                const cp = cell.codepoint();
-                if (cp == 0) {
-                    try writer.writeAll("\"char\":\" \"");
-                } else if (cp == '"') {
-                    try writer.writeAll("\"char\":\"\\\"\"");
-                } else if (cp == '\\') {
-                    try writer.writeAll("\"char\":\"\\\\\"");
-                } else if (cp < 0x20 or cp == 0x7f) {
-                    // Control characters - use unicode escape
-                    try writer.print("\"char\":\"\\u{x:0>4}\"", .{cp});
-                } else {
-                    // Regular character - encode as UTF-8
-                    var buf: [4]u8 = undefined;
-                    const len = std.unicode.utf8Encode(cp, &buf) catch 1;
-                    try writer.writeAll("\"char\":\"");
-                    try writer.writeAll(buf[0..len]);
-                    try writer.writeAll("\"");
-                }
-
-                // Write column position
-                try writer.print(",\"x\":{d}", .{x});
-
-                // Write wide flag if applicable
-                if (cell.wide == .wide) {
-                    try writer.writeAll(",\"wide\":true");
-                }
-
-                // Get style if non-default
-                if (cell.style_id != terminal.style.default_id) {
-                    const style = page.styles.get(page.memory, cell.style_id);
-
-                    // Foreground color
-                    switch (style.fg_color) {
-                        .none => {},
-                        .palette => |idx| try writer.print(",\"fg\":{{\"palette\":{d}}}", .{idx}),
-                        .rgb => |rgb| try writer.print(",\"fg\":{{\"r\":{d},\"g\":{d},\"b\":{d}}}", .{ rgb.r, rgb.g, rgb.b }),
-                    }
-
-                    // Background color
-                    switch (style.bg_color) {
-                        .none => {},
-                        .palette => |idx| try writer.print(",\"bg\":{{\"palette\":{d}}}", .{idx}),
-                        .rgb => |rgb| try writer.print(",\"bg\":{{\"r\":{d},\"g\":{d},\"b\":{d}}}", .{ rgb.r, rgb.g, rgb.b }),
-                    }
-
-                    // Style flags
-                    if (style.flags.bold) try writer.writeAll(",\"bold\":true");
-                    if (style.flags.italic) try writer.writeAll(",\"italic\":true");
-                    if (style.flags.faint) try writer.writeAll(",\"faint\":true");
-                    if (style.flags.blink) try writer.writeAll(",\"blink\":true");
-                    if (style.flags.inverse) try writer.writeAll(",\"inverse\":true");
-                    if (style.flags.invisible) try writer.writeAll(",\"invisible\":true");
-                    if (style.flags.strikethrough) try writer.writeAll(",\"strikethrough\":true");
-                    if (style.flags.overline) try writer.writeAll(",\"overline\":true");
-                    if (style.flags.underline != .none) {
-                        try writer.print(",\"underline\":\"{s}\"", .{@tagName(style.flags.underline)});
-                    }
-                } else {
+                if (cell_style_id == terminal.style.default_id) {
                     // Check for background-only cells
                     switch (cell.content_tag) {
-                        .bg_color_palette => {
-                            try writer.print(",\"bg\":{{\"palette\":{d}}}", .{cell.content.color_palette});
-                        },
-                        .bg_color_rgb => {
-                            const rgb = cell.content.color_rgb;
-                            try writer.print(",\"bg\":{{\"r\":{d},\"g\":{d},\"b\":{d}}}", .{ rgb.r, rgb.g, rgb.b });
-                        },
+                        .bg_color_palette => cell_bg_palette = cell.content.color_palette,
+                        .bg_color_rgb => cell_bg_rgb = cell.content.color_rgb,
                         else => {},
                     }
                 }
 
-                try writer.writeAll("}");
+                // Check if style changed
+                const style_changed = (cell_style_id != span_style_id) or
+                    (cell_bg_palette != null) != (span_bg_palette != null) or
+                    (cell_bg_palette != null and span_bg_palette != null and cell_bg_palette.? != span_bg_palette.?) or
+                    (cell_bg_rgb != null) != (span_bg_rgb != null) or
+                    (cell_bg_rgb != null and span_bg_rgb != null and
+                    (cell_bg_rgb.?.r != span_bg_rgb.?.r or cell_bg_rgb.?.g != span_bg_rgb.?.g or cell_bg_rgb.?.b != span_bg_rgb.?.b));
+
+                // If style changed and we have accumulated text, output the span
+                if (style_changed and span_len > 0) {
+                    try writeSpan(writer, page, &span_buf, span_start, span_len, span_style_id, span_bg_palette, span_bg_rgb, &first_span);
+                    span_len = 0;
+                }
+
+                // Start new span if needed
+                if (span_len == 0) {
+                    span_start = x;
+                    span_style_id = cell_style_id;
+                    span_bg_palette = cell_bg_palette;
+                    span_bg_rgb = cell_bg_rgb;
+                }
+
+                // Add character to span buffer
+                const cp = cell.codepoint();
+                if (cp == 0) {
+                    span_buf[span_len] = ' ';
+                    span_len += 1;
+                } else {
+                    const len = std.unicode.utf8Encode(cp, span_buf[span_len..]) catch 1;
+                    span_len += len;
+                }
             }
 
-            try writer.writeAll("],\"wrap\":");
-            try writer.writeAll(if (row.wrap) "true" else "false");
+            // Output final span (skip if just trailing spaces with default style)
+            if (span_len > 0) {
+                const is_default = span_style_id == terminal.style.default_id and
+                    span_bg_palette == null and span_bg_rgb == null;
+                const is_trailing_space = is_default and isAllSpaces(span_buf[0..span_len]);
+
+                if (!is_trailing_space) {
+                    // Trim trailing spaces from final span
+                    var trimmed_len = span_len;
+                    if (is_default) {
+                        while (trimmed_len > 0 and span_buf[trimmed_len - 1] == ' ') {
+                            trimmed_len -= 1;
+                        }
+                    }
+                    if (trimmed_len > 0) {
+                        try writeSpan(writer, page, &span_buf, span_start, trimmed_len, span_style_id, span_bg_palette, span_bg_rgb, &first_span);
+                    }
+                }
+            }
+
+            try writer.writeAll("]");
+            if (row.wrap) try writer.writeAll(",\"wrap\":true");
             try writer.writeAll("}");
+            row_idx += 1;
         }
     }
 
@@ -3487,6 +3489,95 @@ pub fn getScreenCells(
     });
 
     return try output.toOwnedSliceSentinel(0);
+}
+
+/// Helper to check if a buffer contains only spaces
+fn isAllSpaces(buf: []const u8) bool {
+    for (buf) |c| {
+        if (c != ' ') return false;
+    }
+    return true;
+}
+
+/// Helper to write a span to the JSON output
+fn writeSpan(
+    writer: anytype,
+    page: anytype,
+    span_buf: []const u8,
+    span_start: usize,
+    span_len: usize,
+    style_id: terminal.style.Id,
+    bg_palette: ?u8,
+    bg_rgb: ?terminal.page.Cell.RGB,
+    first_span: *bool,
+) !void {
+    if (!first_span.*) try writer.writeAll(",");
+    first_span.* = false;
+
+    try writer.print("{{\"x\":{d},\"t\":\"", .{span_start});
+
+    // Write text with JSON escaping
+    for (span_buf[0..span_len]) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => if (c < 0x20) {
+                try writer.print("\\u{x:0>4}", .{c});
+            } else {
+                try writer.writeByte(c);
+            },
+        }
+    }
+    try writer.writeAll("\"");
+
+    // Write style if non-default
+    if (style_id != terminal.style.default_id) {
+        const style = page.styles.get(page.memory, style_id);
+
+        // Foreground color
+        switch (style.fg_color) {
+            .none => {},
+            .palette => |idx| try writer.print(",\"fg\":{d}", .{idx}),
+            .rgb => |rgb| try writer.print(",\"fg\":[{d},{d},{d}]", .{ rgb.r, rgb.g, rgb.b }),
+        }
+
+        // Background color
+        switch (style.bg_color) {
+            .none => {},
+            .palette => |idx| try writer.print(",\"bg\":{d}", .{idx}),
+            .rgb => |rgb| try writer.print(",\"bg\":[{d},{d},{d}]", .{ rgb.r, rgb.g, rgb.b }),
+        }
+
+        // Style flags - use compact single-char keys
+        if (style.flags.bold) try writer.writeAll(",\"b\":1");
+        if (style.flags.italic) try writer.writeAll(",\"i\":1");
+        if (style.flags.faint) try writer.writeAll(",\"f\":1");
+        if (style.flags.inverse) try writer.writeAll(",\"inv\":1");
+        if (style.flags.strikethrough) try writer.writeAll(",\"s\":1");
+        if (style.flags.underline != .none) {
+            const ul: u8 = switch (style.flags.underline) {
+                .none => 0,
+                .single => 1,
+                .double => 2,
+                .curly => 3,
+                .dotted => 4,
+                .dashed => 5,
+            };
+            try writer.print(",\"u\":{d}", .{ul});
+        }
+    }
+
+    // Background-only color (no other style)
+    if (bg_palette) |idx| {
+        try writer.print(",\"bg\":{d}", .{idx});
+    } else if (bg_rgb) |rgb| {
+        try writer.print(",\"bg\":[{d},{d},{d}]", .{ rgb.r, rgb.g, rgb.b });
+    }
+
+    try writer.writeAll("}");
 }
 
 /// Get the current cursor position.
