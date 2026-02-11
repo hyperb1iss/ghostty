@@ -1846,9 +1846,7 @@ pub const Application = extern struct {
 
         // Without args, delegate to the regular new-tab action.
         if (self.core().focusedSurface()) |focused| {
-            self.core().performAction(self.rt(), .{ .surface = focused }, .new_tab, {}) catch |err| {
-                log.warn("failed to perform new_tab err={}", .{err});
-            };
+            _ = Action.newTab(.{ .surface = focused });
             return;
         }
     }

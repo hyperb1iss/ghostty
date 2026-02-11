@@ -100,7 +100,7 @@ pub fn Server(comptime App: type) type {
 
             // Set non-blocking
             const flags = try posix.fcntl(socket_fd, posix.F.GETFL, 0);
-            _ = try posix.fcntl(socket_fd, posix.F.SETFL, @as(u32, @intCast(flags)) | @as(u32, @intFromEnum(posix.O.NONBLOCK)));
+            _ = try posix.fcntl(socket_fd, posix.F.SETFL, @as(u32, @intCast(flags)) | @as(u32, @bitCast(posix.O{ .NONBLOCK = true })));
 
             log.info("IPC server listening on {s}", .{socket_path});
 
@@ -194,14 +194,12 @@ pub fn Server(comptime App: type) type {
                     uid: u32,
                     gid: u32,
                 } = undefined;
-                var len: posix.socklen_t = @sizeOf(@TypeOf(cred));
 
                 posix.getsockopt(
                     client_fd,
                     posix.SOL.SOCKET,
                     posix.SO.PEERCRED,
                     std.mem.asBytes(&cred),
-                    &len,
                 ) catch return false;
 
                 return cred.uid == posix.getuid();
@@ -247,7 +245,7 @@ pub fn Server(comptime App: type) type {
         fn sendResponse(self: *Self, client_fd: posix.socket_t, alloc: Allocator, response: Response) !void {
             _ = self;
 
-            const json = try std.json.stringifyAlloc(alloc, response, .{});
+            const json = try std.json.Stringify.valueAlloc(alloc, response, .{});
 
             // Send length prefix
             var len_bytes: [4]u8 = undefined;

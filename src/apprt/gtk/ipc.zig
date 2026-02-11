@@ -29,14 +29,15 @@ const log = std.log.scoped(.gtk_ipc);
 pub fn listSurfaces(app: *Application, alloc: Allocator) Response {
     _ = app;
 
-    var windows = std.ArrayList(Response.Window).init(alloc);
+    var windows: std.ArrayListUnmanaged(Response.Window) = .empty;
 
     // Iterate over all top-level windows
     const window_list = gtk.Window.listToplevels();
     defer window_list.free();
 
-    var iter = window_list.iterator();
-    while (iter.next()) |data| {
+    var node: ?*glib.List = @ptrCast(window_list);
+    while (node) |n| : (node = n.f_next) {
+        const data = n.f_data orelse continue;
         const widget: *gtk.Widget = @ptrCast(@alignCast(data));
 
         // Only process our Window type
@@ -46,18 +47,18 @@ pub fn listSurfaces(app: *Application, alloc: Allocator) Response {
         const window_id = formatObjectId(alloc, window) catch continue;
         const is_focused = window.as(gtk.Window).isActive() != 0;
 
-        var tabs = std.ArrayList(Response.Tab).init(alloc);
+        var tabs: std.ArrayListUnmanaged(Response.Tab) = .empty;
         collectTabs(window, &tabs, alloc) catch continue;
 
-        windows.append(.{
+        windows.append(alloc, .{
             .id = window_id,
             .focused = is_focused,
-            .tabs = tabs.toOwnedSlice() catch &.{},
+            .tabs = tabs.toOwnedSlice(alloc) catch &.{},
         }) catch continue;
     }
 
     return ipc.successData(.{
-        .windows = windows.toOwnedSlice() catch &.{},
+        .windows = windows.toOwnedSlice(alloc) catch &.{},
     });
 }
 
@@ -275,7 +276,7 @@ pub fn newWindow(app: *Application, arguments: ?[]const []const u8) Response {
     _ = arguments; // TODO: implement command arguments
 
     // Queue a new window action via the application
-    app.performAction(.app, .new_window, .{}) catch {
+    _ = app.performAction(.app, .new_window, {}) catch {
         return ipc.err("Failed to create new window");
     };
 
@@ -292,8 +293,9 @@ pub fn newTab(app: *Application, arguments: ?[]const []const u8) Response {
     defer window_list.free();
 
     var target_window: ?*Window = null;
-    var iter = window_list.iterator();
-    while (iter.next()) |data| {
+    var node: ?*glib.List = @ptrCast(window_list);
+    while (node) |n| : (node = n.f_next) {
+        const data = n.f_data orelse continue;
         const widget: *gtk.Widget = @ptrCast(@alignCast(data));
         if (!gobject.ext.isA(widget, Window)) continue;
         const window: *Window = @ptrCast(widget);
@@ -339,8 +341,9 @@ fn findSurfaceById(surface_id: []const u8) ?*Surface {
     const window_list = gtk.Window.listToplevels();
     defer window_list.free();
 
-    var iter = window_list.iterator();
-    while (iter.next()) |data| {
+    var node: ?*glib.List = @ptrCast(window_list);
+    while (node) |n| : (node = n.f_next) {
+        const data = n.f_data orelse continue;
         const widget: *gtk.Widget = @ptrCast(@alignCast(data));
         if (!gobject.ext.isA(widget, Window)) continue;
         const window: *Window = @ptrCast(widget);
@@ -370,16 +373,14 @@ fn findSurfaceInWindow(window: *Window, target_ptr: usize) ?*Surface {
 }
 
 /// Collect tabs from a window.
-fn collectTabs(window: *Window, tabs: *std.ArrayList(Response.Tab), alloc: Allocator) !void {
+fn collectTabs(window: *Window, tabs: *std.ArrayListUnmanaged(Response.Tab), alloc: Allocator) !void {
     // Get the active surface info as a single-surface/single-tab representation
     // Full tab iteration would require accessing private tab_view
     const active = window.getActiveSurface() orelse return;
 
     const surface_id = try formatObjectId(alloc, active);
-    const title_raw = active.getTitle();
-    const title = if (title_raw) |t| std.mem.span(t) else "";
-    const pwd_raw = active.getPwd();
-    const pwd = if (pwd_raw) |p| std.mem.span(p) else "";
+    const title: []const u8 = if (active.getTitle()) |t| t else "";
+    const pwd: []const u8 = if (active.getPwd()) |p| p else "";
 
     const core = active.core();
     var grid_rows: u32 = 0;
@@ -390,8 +391,8 @@ fn collectTabs(window: *Window, tabs: *std.ArrayList(Response.Tab), alloc: Alloc
         grid_cols = grid.columns;
     }
 
-    var surfaces = std.ArrayList(Response.Surface).init(alloc);
-    try surfaces.append(.{
+    var surfaces: std.ArrayListUnmanaged(Response.Surface) = .empty;
+    try surfaces.append(alloc, .{
         .id = surface_id,
         .title = try alloc.dupe(u8, title),
         .focused = active.getFocused(),
@@ -401,11 +402,11 @@ fn collectTabs(window: *Window, tabs: *std.ArrayList(Response.Tab), alloc: Alloc
     });
 
     const window_id = try formatObjectId(alloc, window);
-    try tabs.append(.{
+    try tabs.append(alloc, .{
         .id = try std.fmt.allocPrint(alloc, "{s}:0", .{window_id}),
         .title = try alloc.dupe(u8, title),
         .active = true,
-        .surfaces = try surfaces.toOwnedSlice(),
+        .surfaces = try surfaces.toOwnedSlice(alloc),
     });
 }
 

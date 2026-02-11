@@ -104,6 +104,9 @@ pub fn performIpc(
         .close_surface,
         .resize_surface,
         .screenshot_surface,
+        .send_mouse,
+        .send_scroll,
+        .send_key,
         => apprt.socket.performIpc(alloc, target, action, value),
     };
 }

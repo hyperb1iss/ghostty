@@ -72,14 +72,14 @@ pub const Server = struct {
         try posix.bind(socket_fd, @ptrCast(&addr), @sizeOf(posix.sockaddr.un));
 
         // Set socket file permissions to 600
-        std.fs.cwd().chmod(socket_path, 0o600) catch {};
+        posix.fchmod(socket_fd, 0o600) catch {};
 
         // Listen for connections
         try posix.listen(socket_fd, 5);
 
         // Set non-blocking
         const flags = try posix.fcntl(socket_fd, posix.F.GETFL, 0);
-        _ = try posix.fcntl(socket_fd, posix.F.SETFL, @as(u32, @intCast(flags)) | @as(u32, @intFromEnum(posix.O.NONBLOCK)));
+        _ = try posix.fcntl(socket_fd, posix.F.SETFL, @as(u32, @intCast(flags)) | @as(u32, @bitCast(posix.O{ .NONBLOCK = true })));
 
         // Create the server struct
         const self = try alloc.create(Server);
@@ -121,7 +121,7 @@ pub const Server = struct {
     }
 
     /// GLib callback to poll the socket.
-    fn pollCallback(user_data: ?*anyopaque) callconv(.c) c_uint {
+    fn pollCallback(user_data: ?*anyopaque) callconv(.c) c_int {
         const self: *Server = @ptrCast(@alignCast(user_data));
         self.acceptAll();
         return 1; // Keep timer active
@@ -220,14 +220,12 @@ pub const Server = struct {
                 uid: u32,
                 gid: u32,
             } = undefined;
-            var len: posix.socklen_t = @sizeOf(@TypeOf(cred));
 
             posix.getsockopt(
                 client_fd,
                 posix.SOL.SOCKET,
                 posix.SO.PEERCRED,
                 std.mem.asBytes(&cred),
-                &len,
             ) catch return false;
 
             return cred.uid == posix.getuid();
@@ -273,7 +271,7 @@ pub const Server = struct {
     fn sendResponse(self: *Server, client_fd: posix.socket_t, alloc: Allocator, response: socket_client.Response) !void {
         _ = self;
 
-        const json = try std.json.stringifyAlloc(alloc, response, .{});
+        const json = try std.json.Stringify.valueAlloc(alloc, response, .{});
 
         // Send length prefix
         var len_bytes: [4]u8 = undefined;
