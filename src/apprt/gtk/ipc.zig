@@ -252,23 +252,29 @@ pub fn resizeSurface(app: *Application, surface_id: []const u8, rows: u32, cols:
 }
 
 /// Take a screenshot of a surface.
-/// Note: This is a simplified implementation. Full screenshot support
-/// requires more complex GTK snapshot/render pipeline.
-pub fn screenshotSurface(app: *Application, surface_id: []const u8, output_path: []const u8) Response {
+/// Captures the last rendered GL frame and saves it as a PNG file.
+pub fn screenshotSurface(app: *Application, alloc: Allocator, surface_id: []const u8, output_path: []const u8) Response {
     _ = app;
 
-    // Validate path - reject traversal attempts
+    // Validate path — reject traversal attempts
     if (std.mem.indexOf(u8, output_path, "..") != null) {
         return ipc.err("Invalid output path");
     }
 
-    _ = findSurfaceById(surface_id) orelse {
+    const surface = findSurfaceById(surface_id) orelse {
         return ipc.err("Surface not found");
     };
 
-    // TODO: Implement GTK screenshot using GdkPaintable/snapshot
-    // This requires more complex GTK4 rendering pipeline
-    return ipc.err("Screenshot not yet implemented for GTK");
+    // Create a null-terminated copy of the output path
+    const path_z = alloc.dupeZ(u8, output_path) catch {
+        return ipc.err("Failed to allocate path");
+    };
+
+    if (!surface.screenshotToFile(path_z)) {
+        return ipc.err("Failed to capture screenshot");
+    }
+
+    return ipc.success();
 }
 
 /// Create a new window.

@@ -835,6 +835,97 @@ pub const Surface = extern struct {
         priv.gl_area.queueRender();
     }
 
+    /// Capture the surface's rendered content and save it as a PNG file.
+    /// Uses GL readback from the last rendered frame and GDK PNG encoding.
+    pub fn screenshotToFile(self: *Self, path: [:0]const u8) bool {
+        const priv = self.private();
+        const core_surface = priv.core_surface orelse return false;
+
+        // Make GL context current (required for GL calls)
+        priv.gl_area.makeCurrent();
+        if (priv.gl_area.getError()) |err| {
+            log.warn("screenshot: failed to make GL context current: {s}", .{
+                err.f_message orelse "(no message)",
+            });
+            return false;
+        }
+
+        // Access the renderer's last rendered target.
+        // If no frame has been rendered yet, force a synchronous draw.
+        var target = core_surface.renderer.api.last_target orelse blk: {
+            core_surface.renderer.drawFrame(true) catch |err| {
+                log.warn("screenshot: failed to draw frame: {}", .{err});
+                return false;
+            };
+            break :blk core_surface.renderer.api.last_target orelse {
+                log.warn("screenshot: no render target available after draw", .{});
+                return false;
+            };
+        };
+        _ = &target;
+
+        const width: c_int = @intCast(target.width);
+        const height: c_int = @intCast(target.height);
+        if (width == 0 or height == 0) return false;
+
+        const stride: usize = @as(usize, @intCast(width)) * 4;
+        const buf_size = stride * @as(usize, @intCast(height));
+
+        // Allocate pixel buffer
+        const alloc = Application.default().allocator();
+        const pixels = alloc.alloc(u8, buf_size) catch return false;
+        defer alloc.free(pixels);
+
+        // Bind the target FBO for reading and read pixels
+        const bound_fbo = target.framebuffer.bind(.read) catch return false;
+        defer bound_fbo.unbind();
+
+        const gl = @import("opengl");
+        gl.glad.context.ReadPixels.?(
+            0,
+            0,
+            width,
+            height,
+            gl.c.GL_RGBA,
+            gl.c.GL_UNSIGNED_BYTE,
+            pixels.ptr,
+        );
+
+        // Flip rows vertically — OpenGL is bottom-up, PNG is top-down
+        const row_buf = alloc.alloc(u8, stride) catch return false;
+        defer alloc.free(row_buf);
+        var y: usize = 0;
+        const h: usize = @intCast(height);
+        while (y < h / 2) : (y += 1) {
+            const top = pixels[y * stride ..][0..stride];
+            const bot = pixels[(h - 1 - y) * stride ..][0..stride];
+            @memcpy(row_buf, top);
+            @memcpy(top, bot);
+            @memcpy(bot, row_buf);
+        }
+
+        // Wrap in GBytes and create a GDK MemoryTexture
+        const bytes = glib.Bytes.new(pixels.ptr, buf_size);
+        defer bytes.unref();
+
+        const texture = gdk.MemoryTexture.new(
+            width,
+            height,
+            .r8g8b8a8,
+            bytes,
+            stride,
+        );
+        defer texture.as(gobject.Object).unref();
+
+        // Save as PNG
+        if (texture.as(gdk.Texture).saveToPng(path) == 0) {
+            log.warn("screenshot: saveToPng failed", .{});
+            return false;
+        }
+
+        return true;
+    }
+
     /// Callback used to determine whether border should be shown around the
     /// surface.
     fn closureShouldBorderBeShown(

@@ -41,8 +41,8 @@ pub const Server = struct {
             else => return e,
         };
 
-        // Set directory permissions to 700
-        var dir = try std.fs.openDirAbsolute(dir_path, .{});
+        // Set directory permissions to 700 (iterate=true to get a real fd, not O_PATH)
+        var dir = try std.fs.openDirAbsolute(dir_path, .{ .iterate = true });
         defer dir.close();
         dir.chmod(0o700) catch {};
 
@@ -202,7 +202,7 @@ pub const Server = struct {
             .focus_surface => |p| ipc_handlers.focusSurface(self.app, p.surface_id),
             .close_surface => |p| ipc_handlers.closeSurface(self.app, p.surface_id),
             .resize_surface => |p| ipc_handlers.resizeSurface(self.app, p.surface_id, p.rows, p.cols),
-            .screenshot_surface => |p| ipc_handlers.screenshotSurface(self.app, p.surface_id, p.output_path),
+            .screenshot_surface => |p| ipc_handlers.screenshotSurface(self.app, alloc, p.surface_id, p.output_path),
             .new_window => |p| ipc_handlers.newWindow(self.app, if (p.arguments) |a| a else null),
             .new_tab => |p| ipc_handlers.newTab(self.app, if (p.arguments) |a| a else null),
             .send_mouse => |p| ipc_handlers.sendMouse(self.app, p.surface_id, p.x, p.y, p.button, p.button_action, p.mods),
