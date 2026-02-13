@@ -618,9 +618,13 @@ class IPCSocketServer {
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
             guard let self else { throw IPCError.appUnavailable }
 
-            // Validate output path - reject paths with traversal attempts
+            // Validate output path — require absolute, reject ".." components
             let outputPath = payload.output_path
-            guard !outputPath.contains("..") else {
+            guard outputPath.hasPrefix("/") else {
+                throw IPCError.invalidArguments
+            }
+            let hasTraversal = outputPath.split(separator: "/").contains { $0 == ".." }
+            guard !hasTraversal else {
                 throw IPCError.invalidArguments
             }
 
@@ -731,6 +735,9 @@ class IPCSocketServer {
     }
 
     private func handleSendScroll(payload: IPCRequest.SendScrollPayload) -> IPCResponse {
+        if payload.mods != nil {
+            logger.debug("scroll mods provided but not yet supported; ignoring")
+        }
         let result: Result<Void, IPCError> = performOnMain { [weak self] in
             guard let self else { throw IPCError.appUnavailable }
 

@@ -146,7 +146,9 @@ pub const Action = union(enum) {
         /// Vertical scroll delta (positive = down, negative = up).
         y: f64 = 0,
 
-        /// Modifier keys: comma-separated list of "shift", "ctrl", "alt", "super".
+        /// Reserved for future use. Scroll events do not currently support
+        /// keyboard modifiers — the underlying scroll handler uses precision/
+        /// momentum semantics only. Provided for API forward-compatibility.
         mods: ?[:0]const u8 = null,
 
         pub const C = extern struct {

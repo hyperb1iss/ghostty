@@ -35,6 +35,9 @@ pub fn Handler(comptime App: type) type {
                 .screenshot_surface => |p| App.ipcScreenshotSurface(self.app, p.surface_id, p.output_path),
                 .new_window => |p| App.ipcNewWindow(self.app, if (p.arguments) |a| a else null),
                 .new_tab => |p| App.ipcNewTab(self.app, if (p.arguments) |a| a else null),
+                .send_mouse => |p| App.ipcSendMouse(self.app, p.surface_id, p.x, p.y, p.button, p.button_action, p.mods),
+                .send_scroll => |p| App.ipcSendScroll(self.app, p.surface_id, p.x, p.y, p.mods),
+                .send_key => |p| App.ipcSendKey(self.app, p.surface_id, p.key, p.action, p.mods),
             };
         }
     };

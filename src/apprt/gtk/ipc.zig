@@ -256,9 +256,20 @@ pub fn resizeSurface(app: *Application, surface_id: []const u8, rows: u32, cols:
 pub fn screenshotSurface(app: *Application, alloc: Allocator, surface_id: []const u8, output_path: []const u8) Response {
     _ = app;
 
-    // Validate path — reject traversal attempts
-    if (std.mem.indexOf(u8, output_path, "..") != null) {
-        return ipc.err("Invalid output path");
+    // Validate path — require absolute path, reject traversal components
+    if (output_path.len == 0 or output_path[0] != '/') {
+        return ipc.err("Output path must be absolute");
+    }
+    // Reject path components that are ".." to prevent directory traversal.
+    // We check for the component rather than substring to allow filenames
+    // like "report..2024.png".
+    {
+        var path_iter = std.mem.tokenizeScalar(u8, output_path, '/');
+        while (path_iter.next()) |component| {
+            if (std.mem.eql(u8, component, "..")) {
+                return ipc.err("Path traversal not allowed");
+            }
+        }
     }
 
     const surface = findSurfaceById(surface_id) orelse {
@@ -279,7 +290,14 @@ pub fn screenshotSurface(app: *Application, alloc: Allocator, surface_id: []cons
 
 /// Create a new window.
 pub fn newWindow(app: *Application, arguments: ?[]const []const u8) Response {
-    _ = arguments; // TODO: implement command arguments
+    // TODO(#7): Wire command arguments through to surface creation.
+    // Requires extending the core app mailbox to carry spawn args for
+    // new_window/new_tab, which currently only accept void payloads.
+    if (arguments) |args| {
+        if (args.len > 0) {
+            log.info("new_window: command arguments provided but not yet supported on GTK ({d} args)", .{args.len});
+        }
+    }
 
     // Queue a new window action via the application
     _ = app.performAction(.app, .new_window, {}) catch {
@@ -291,8 +309,12 @@ pub fn newWindow(app: *Application, arguments: ?[]const []const u8) Response {
 
 /// Create a new tab.
 pub fn newTab(app: *Application, arguments: ?[]const []const u8) Response {
-    // TODO: implement command arguments
-    _ = arguments;
+    // TODO(#7): Wire command arguments through to surface creation (see newWindow).
+    if (arguments) |args| {
+        if (args.len > 0) {
+            log.info("new_tab: command arguments provided but not yet supported on GTK ({d} args)", .{args.len});
+        }
+    }
 
     // Get the focused window for the new tab
     const window_list = gtk.Window.listToplevels();
@@ -364,56 +386,85 @@ fn findSurfaceById(surface_id: []const u8) ?*Surface {
 }
 
 /// Find a surface in a window by pointer value.
+/// Iterates all tabs and their split trees to find non-active surfaces.
 fn findSurfaceInWindow(window: *Window, target_ptr: usize) ?*Surface {
-    // Get the active surface first as a quick check
-    if (window.getActiveSurface()) |active| {
-        if (@intFromPtr(active) == target_ptr) {
-            return active;
+    const tab_view = window.getTabView();
+    const n = tab_view.getNPages();
+    if (n <= 0) return null;
+
+    for (0..@intCast(n)) |i| {
+        const page = tab_view.getNthPage(@intCast(i));
+        const child = page.getChild();
+        const tab = gobject.ext.cast(Tab, child) orelse continue;
+        const tree = tab.getSurfaceTree() orelse continue;
+
+        var it = tree.iterator();
+        while (it.next()) |entry| {
+            if (@intFromPtr(entry.view) == target_ptr) {
+                return entry.view;
+            }
         }
     }
 
-    // If not the active surface, we'd need to iterate through tabs
-    // For now, return null and rely on the active surface check
-    // Full implementation would require accessing the tab_view which is private
     return null;
 }
 
-/// Collect tabs from a window.
+/// Collect tabs from a window, iterating all tabs and their split trees.
 fn collectTabs(window: *Window, tabs: *std.ArrayListUnmanaged(Response.Tab), alloc: Allocator) !void {
-    // Get the active surface info as a single-surface/single-tab representation
-    // Full tab iteration would require accessing private tab_view
-    const active = window.getActiveSurface() orelse return;
-
-    const surface_id = try formatObjectId(alloc, active);
-    const title: []const u8 = if (active.getTitle()) |t| t else "";
-    const pwd: []const u8 = if (active.getPwd()) |p| p else "";
-
-    const core = active.core();
-    var grid_rows: u32 = 0;
-    var grid_cols: u32 = 0;
-    if (core) |c| {
-        const grid = c.size.grid();
-        grid_rows = grid.rows;
-        grid_cols = grid.columns;
-    }
-
-    var surfaces: std.ArrayListUnmanaged(Response.Surface) = .empty;
-    try surfaces.append(alloc, .{
-        .id = surface_id,
-        .title = try alloc.dupe(u8, title),
-        .focused = active.getFocused(),
-        .pwd = try alloc.dupe(u8, pwd),
-        .rows = grid_rows,
-        .cols = grid_cols,
-    });
+    const tab_view = window.getTabView();
+    const n = tab_view.getNPages();
+    if (n <= 0) return;
 
     const window_id = try formatObjectId(alloc, window);
-    try tabs.append(alloc, .{
-        .id = try std.fmt.allocPrint(alloc, "{s}:0", .{window_id}),
-        .title = try alloc.dupe(u8, title),
-        .active = true,
-        .surfaces = try surfaces.toOwnedSlice(alloc),
-    });
+    const selected_page = tab_view.getSelectedPage();
+
+    for (0..@intCast(n)) |i| {
+        const page = tab_view.getNthPage(@intCast(i));
+        const child = page.getChild();
+        const tab = gobject.ext.cast(Tab, child) orelse continue;
+        const tree = tab.getSurfaceTree() orelse continue;
+
+        var surfaces: std.ArrayListUnmanaged(Response.Surface) = .empty;
+        var tab_title: []const u8 = "";
+
+        var it = tree.iterator();
+        while (it.next()) |entry| {
+            const surface = entry.view;
+            const surface_id = try formatObjectId(alloc, surface);
+            const title: []const u8 = if (surface.getTitle()) |t| t else "";
+            const pwd: []const u8 = if (surface.getPwd()) |p| p else "";
+
+            var grid_rows: u32 = 0;
+            var grid_cols: u32 = 0;
+            if (surface.core()) |c| {
+                const grid = c.size.grid();
+                grid_rows = grid.rows;
+                grid_cols = grid.columns;
+            }
+
+            try surfaces.append(alloc, .{
+                .id = surface_id,
+                .title = try alloc.dupe(u8, title),
+                .focused = surface.getFocused(),
+                .pwd = try alloc.dupe(u8, pwd),
+                .rows = grid_rows,
+                .cols = grid_cols,
+            });
+
+            // Use the first surface's title as the tab title
+            if (tab_title.len == 0) tab_title = title;
+        }
+
+        if (surfaces.items.len > 0) {
+            const is_active = if (selected_page) |sp| (sp == page) else (i == 0);
+            try tabs.append(alloc, .{
+                .id = try std.fmt.allocPrint(alloc, "{s}:{d}", .{ window_id, i }),
+                .title = try alloc.dupe(u8, tab_title),
+                .active = is_active,
+                .surfaces = try surfaces.toOwnedSlice(alloc),
+            });
+        }
+    }
 }
 
 /// Parse a mouse button string to MouseButton enum.
@@ -441,7 +492,9 @@ pub fn sendScroll(
     mods_str: ?[]const u8,
 ) Response {
     _ = app;
-    _ = mods_str; // TODO: modifiers not currently used for scroll
+    if (mods_str != null) {
+        log.debug("scroll mods provided but not yet supported; ignoring", .{});
+    }
 
     const surface = findSurfaceById(surface_id) orelse {
         return ipc.err("Surface not found");

@@ -1,8 +1,14 @@
 # RFC: Terminal Automation Protocol
 
-**Status:** Draft
+**Status:** Draft (aspirational — not yet implemented as specified)
 **Author:** Stefanie Jane
 **Created:** 2025-12-29
+
+> **Implementation note:** The current implementation uses protocol version 1
+> with a `{"version": 1, "action": {"<name>": <payload>}}` envelope. This RFC
+> describes a proposed v2 schema that has not yet been adopted. Do not rely on
+> v2 request/response shapes in client code until this status changes to
+> "Accepted".
 
 ## Summary
 
