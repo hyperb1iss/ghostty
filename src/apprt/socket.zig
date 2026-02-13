@@ -444,7 +444,7 @@ pub const Client = struct {
         var resp_len_bytes: [4]u8 = undefined;
         try readExact(self.socket, resp_len_bytes[0..]);
         const resp_len = std.mem.readInt(u32, &resp_len_bytes, .little);
-        if (resp_len > 1024 * 1024) { // 1MB max response
+        if (resp_len > 16 * 1024 * 1024) { // 16MB max response (screenshots)
             return error.ResponseTooLarge;
         }
 

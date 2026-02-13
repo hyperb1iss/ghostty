@@ -3439,6 +3439,13 @@ pub fn getScreenCells(
                     span_bg_rgb = cell_bg_rgb;
                 }
 
+                // Flush span if buffer is near capacity (need up to 4 bytes for next char)
+                if (span_len + 4 > span_buf.len) {
+                    try writeSpan(writer, page, &span_buf, span_start, span_len, span_style_id, span_bg_palette, span_bg_rgb, &first_span);
+                    span_len = 0;
+                    span_start = x;
+                }
+
                 // Add character to span buffer
                 const cp = cell.codepoint();
                 if (cp == 0) {

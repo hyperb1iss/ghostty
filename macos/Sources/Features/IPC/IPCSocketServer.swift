@@ -211,7 +211,7 @@ class IPCSocketServer {
                 (UInt32(lengthBytes[2]) << 16) |
                 (UInt32(lengthBytes[3]) << 24)
 
-            guard messageLength <= 1024 * 1024 else {
+            guard messageLength <= 16 * 1024 * 1024 else {
                 try sendResponseOrThrow(clientFD, response: IPCResponse(ok: false, error: "Request too large"))
                 return
             }

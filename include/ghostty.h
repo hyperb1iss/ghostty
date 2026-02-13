@@ -1061,6 +1061,32 @@ typedef struct {
   const char *output_path;
 } ghostty_ipc_action_screenshot_surface_s;
 
+// apprt.ipc.Action.SendMouse
+typedef struct {
+  const char *surface_id;
+  double x;
+  double y;
+  const char *button;
+  const char *button_action;
+  const char *mods;
+} ghostty_ipc_action_send_mouse_s;
+
+// apprt.ipc.Action.SendScroll
+typedef struct {
+  const char *surface_id;
+  double x;
+  double y;
+  const char *mods;
+} ghostty_ipc_action_send_scroll_s;
+
+// apprt.ipc.Action.SendKey
+typedef struct {
+  const char *surface_id;
+  const char *key;
+  const char *action;
+  const char *mods;
+} ghostty_ipc_action_send_key_s;
+
 typedef union {
   ghostty_ipc_action_new_window_s new_window;
   ghostty_ipc_action_new_tab_s new_tab;
@@ -1070,6 +1096,9 @@ typedef union {
   ghostty_ipc_action_close_surface_s close_surface;
   ghostty_ipc_action_resize_surface_s resize_surface;
   ghostty_ipc_action_screenshot_surface_s screenshot_surface;
+  ghostty_ipc_action_send_mouse_s send_mouse;
+  ghostty_ipc_action_send_scroll_s send_scroll;
+  ghostty_ipc_action_send_key_s send_key;
 } ghostty_ipc_action_u;
 
 // apprt.ipc.Action.Key
@@ -1083,6 +1112,9 @@ typedef enum {
   GHOSTTY_IPC_ACTION_CLOSE_SURFACE,
   GHOSTTY_IPC_ACTION_RESIZE_SURFACE,
   GHOSTTY_IPC_ACTION_SCREENSHOT_SURFACE,
+  GHOSTTY_IPC_ACTION_SEND_MOUSE,
+  GHOSTTY_IPC_ACTION_SEND_SCROLL,
+  GHOSTTY_IPC_ACTION_SEND_KEY,
 } ghostty_ipc_action_tag_e;
 
 //-------------------------------------------------------------------

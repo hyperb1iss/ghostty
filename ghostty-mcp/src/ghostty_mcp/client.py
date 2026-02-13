@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 # =============================================================================
 
 PROTOCOL_VERSION = 1
-MAX_MESSAGE_SIZE = 1024 * 1024  # 1MB
+MAX_MESSAGE_SIZE = 16 * 1024 * 1024  # 16MB (screenshots can be large)
 
 # =============================================================================
 # Exceptions
