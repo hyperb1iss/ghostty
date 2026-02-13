@@ -852,15 +852,23 @@ pub const Surface = extern struct {
 
         // Access the renderer's last rendered target.
         // If no frame has been rendered yet, force a synchronous draw.
-        var target = core_surface.renderer.api.last_target orelse blk: {
+        // Note: drawFrame acquires draw_mutex internally, so we can't hold it here.
+        if (core_surface.renderer.api.last_target == null) {
             core_surface.renderer.drawFrame(true) catch |err| {
                 log.warn("screenshot: failed to draw frame: {}", .{err});
                 return false;
             };
-            break :blk core_surface.renderer.api.last_target orelse {
-                log.warn("screenshot: no render target available after draw", .{});
-                return false;
-            };
+        }
+
+        // Hold the draw mutex while we snapshot the target and read pixels.
+        // This prevents the renderer from starting a new frame that could
+        // overwrite last_target or recycle its FBO during our readback.
+        core_surface.renderer.draw_mutex.lock();
+        defer core_surface.renderer.draw_mutex.unlock();
+
+        var target = core_surface.renderer.api.last_target orelse {
+            log.warn("screenshot: no render target available", .{});
+            return false;
         };
         _ = &target;
 

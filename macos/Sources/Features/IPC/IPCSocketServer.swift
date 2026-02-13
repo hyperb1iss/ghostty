@@ -800,15 +800,19 @@ class IPCSocketServer {
             }
 
             // Use the Zig key parsing to convert W3C key name
+            var keySuccess = false
             MainActor.assumeIsolated {
                 payload.key.withCString { keyPtr in
-                    ghostty_surface_send_key_from_string(
+                    keySuccess = ghostty_surface_send_key_from_string(
                         surfaceC,
                         action,
                         mods,
                         keyPtr
                     )
                 }
+            }
+            guard keySuccess else {
+                throw IPCError.invalidArguments
             }
         }
 

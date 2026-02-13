@@ -1,7 +1,9 @@
 //! GTK IPC server integration.
 //!
 //! This module provides the socket server for GTK, integrating with GLib's
-//! main loop for event-driven socket handling.
+//! main loop for event-driven socket handling. Client I/O runs on spawned
+//! threads to avoid blocking the GTK main loop, while request handlers
+//! execute on the main thread via glib.idleAdd (required for GTK access).
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -20,6 +22,20 @@ const max_message_size: usize = 16 * 1024 * 1024;
 
 /// Poll interval in milliseconds.
 const poll_interval_ms: c_uint = 100;
+
+/// Context passed from client thread to main thread via glib.idleAdd.
+const ClientDispatch = struct {
+    server: *Server,
+    client_fd: posix.socket_t,
+    request: socket_client.Request,
+    arena: std.heap.ArenaAllocator,
+
+    // Synchronization: thread waits for main thread to produce response.
+    mutex: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+    response: ?socket_client.Response = null,
+    done: bool = false,
+};
 
 /// GTK IPC Server using GLib's event loop.
 pub const Server = struct {
@@ -133,6 +149,7 @@ pub const Server = struct {
     }
 
     /// Accept and handle a single connection.
+    /// Spawns a thread for blocking I/O to avoid stalling the GTK main loop.
     fn acceptOne(self: *Server) bool {
         var client_addr: posix.sockaddr.un = undefined;
         var addr_len: posix.socklen_t = @sizeOf(posix.sockaddr.un);
@@ -150,12 +167,20 @@ pub const Server = struct {
             },
         };
 
-        self.handleClient(client_fd);
+        // Spawn a detached thread for this client's I/O.
+        // The thread handles blocking reads/writes off the main loop.
+        const thread = std.Thread.spawn(.{}, clientThread, .{ self, client_fd }) catch |e| {
+            log.err("failed to spawn client thread: {}", .{e});
+            posix.close(client_fd);
+            return true;
+        };
+        thread.detach();
         return true;
     }
 
-    /// Handle a client connection.
-    fn handleClient(self: *Server, client_fd: posix.socket_t) void {
+    /// Client thread: validates peer, reads request, dispatches to main thread,
+    /// sends response. All blocking I/O happens here, not on the GTK main loop.
+    fn clientThread(self: *Server, client_fd: posix.socket_t) void {
         defer posix.close(client_fd);
 
         // Validate peer is same user
@@ -164,16 +189,24 @@ pub const Server = struct {
             return;
         }
 
-        // Set read timeout
-        const timeout = posix.timeval{ .sec = 5, .usec = 0 };
+        // Set socket timeouts (1s read, 5s write for large responses)
+        const read_timeout = posix.timeval{ .sec = 1, .usec = 0 };
         posix.setsockopt(
             client_fd,
             posix.SOL.SOCKET,
             posix.SO.RCVTIMEO,
-            std.mem.asBytes(&timeout),
+            std.mem.asBytes(&read_timeout),
         ) catch {};
 
-        // Read and handle request
+        const write_timeout = posix.timeval{ .sec = 5, .usec = 0 };
+        posix.setsockopt(
+            client_fd,
+            posix.SOL.SOCKET,
+            posix.SO.SNDTIMEO,
+            std.mem.asBytes(&write_timeout),
+        ) catch {};
+
+        // Read and parse request (blocking, but on this thread)
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
         const alloc = arena.allocator();
@@ -184,13 +217,49 @@ pub const Server = struct {
             return;
         };
 
-        // Handle request
-        const response = self.handleRequest(alloc, request);
-
-        // Send response
-        self.sendResponse(client_fd, alloc, response) catch |e| {
-            log.err("failed to send response: {}", .{e});
+        // Dispatch handler to GTK main thread and wait for result.
+        // IPC handlers access GTK widgets and must run on the main thread.
+        var dispatch = ClientDispatch{
+            .server = self,
+            .client_fd = client_fd,
+            .request = request,
+            .arena = std.heap.ArenaAllocator.init(self.alloc),
         };
+
+        _ = glib.idleAdd(mainThreadDispatch, &dispatch);
+
+        // Wait for main thread to produce the response
+        dispatch.mutex.lock();
+        defer dispatch.mutex.unlock();
+        while (!dispatch.done) {
+            dispatch.cond.wait(&dispatch.mutex);
+        }
+
+        defer dispatch.arena.deinit();
+
+        // Send response (blocking write, on this thread)
+        if (dispatch.response) |response| {
+            self.sendResponse(client_fd, dispatch.arena.allocator(), response) catch |e| {
+                log.err("failed to send response: {}", .{e});
+            };
+        }
+    }
+
+    /// GLib idle callback: runs on GTK main thread.
+    /// Handles the request and signals the waiting client thread.
+    fn mainThreadDispatch(user_data: ?*anyopaque) callconv(.c) c_int {
+        const dispatch: *ClientDispatch = @ptrCast(@alignCast(user_data));
+        const alloc = dispatch.arena.allocator();
+
+        const response = dispatch.server.handleRequest(alloc, dispatch.request);
+
+        dispatch.mutex.lock();
+        defer dispatch.mutex.unlock();
+        dispatch.response = response;
+        dispatch.done = true;
+        dispatch.cond.signal();
+
+        return 0; // Remove idle source (one-shot)
     }
 
     /// Handle a request by calling the appropriate handler.
