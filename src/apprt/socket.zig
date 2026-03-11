@@ -5,9 +5,9 @@
 //! sockets (or named pipes on Windows).
 //!
 //! Socket path resolution:
-//! - Linux: $XDG_RUNTIME_DIR/ghostty/<instance>.sock or /tmp/ghostty-$UID/<instance>.sock
-//! - macOS: $TMPDIR/ghostty-$UID/<instance>.sock or /tmp/ghostty-$UID/<instance>.sock
-//! - Windows: \\.\pipe\ghostty-<instance> (named pipe)
+//! - Linux: $XDG_RUNTIME_DIR/ghostty-automator/<instance>.sock or /tmp/ghostty-automator-$UID/<instance>.sock
+//! - macOS: $TMPDIR/ghostty-automator-$UID/<instance>.sock or /tmp/ghostty-automator-$UID/<instance>.sock
+//! - Windows: \\.\pipe\ghostty-automator-<instance> (named pipe)
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -37,7 +37,7 @@ fn readExact(socket: posix.socket_t, buf: []u8) !void {
 }
 
 /// Default socket filename for the primary instance.
-pub const default_socket_name = "ghostty.sock";
+pub const default_socket_name = "ghostty-automator.sock";
 
 /// JSON request sent to the socket server.
 pub const Request = struct {
@@ -216,19 +216,19 @@ pub fn getSocketDir(alloc: Allocator) ![]u8 {
     // Try XDG_RUNTIME_DIR first (Linux)
     if (builtin.os.tag == .linux) {
         if (std.posix.getenv("XDG_RUNTIME_DIR")) |runtime_dir| {
-            return try std.fs.path.join(alloc, &.{ runtime_dir, "ghostty" });
+            return try std.fs.path.join(alloc, &.{ runtime_dir, "ghostty-automator" });
         }
     }
 
     // Try TMPDIR (macOS sets this per-user)
     if (std.posix.getenv("TMPDIR")) |tmpdir| {
-        const subdir = try std.fmt.allocPrint(alloc, "ghostty-{d}", .{uid});
+        const subdir = try std.fmt.allocPrint(alloc, "ghostty-automator-{d}", .{uid});
         defer alloc.free(subdir);
         return try std.fs.path.join(alloc, &.{ tmpdir, subdir });
     }
 
     // Fallback to /tmp/ghostty-$UID
-    return try std.fmt.allocPrint(alloc, "/tmp/ghostty-{d}", .{uid});
+    return try std.fmt.allocPrint(alloc, "/tmp/ghostty-automator-{d}", .{uid});
 }
 
 /// Get the full socket path for the given instance name.

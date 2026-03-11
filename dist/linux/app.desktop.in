@@ -5,7 +5,7 @@ Type=Application
 Comment=A terminal emulator
 TryExec=@GHOSTTY@
 Exec=@GHOSTTY@ --gtk-single-instance=true
-Icon=com.mitchellh.ghostty
+Icon=com.hyperb1iss.ghostty-automator
 Categories=System;TerminalEmulator;
 Keywords=terminal;tty;pty;
 StartupNotify=true

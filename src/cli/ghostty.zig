@@ -27,6 +27,9 @@ const focus_surface = @import("focus_surface.zig");
 const close_surface = @import("close_surface.zig");
 const resize_surface = @import("resize_surface.zig");
 const screenshot_surface = @import("screenshot_surface.zig");
+const send_key = @import("send_key.zig");
+const send_mouse = @import("send_mouse.zig");
+const send_scroll = @import("send_scroll.zig");
 
 /// Special commands that can be invoked via CLI flags. These are all
 /// invoked by using `+<action>` as a CLI flag. The only exception is
@@ -100,6 +103,15 @@ pub const Action = enum {
 
     // Use IPC to take a screenshot of a surface.
     @"screenshot-surface",
+
+    // Use IPC to send a keyboard event to a surface.
+    @"send-key",
+
+    // Use IPC to send a mouse event to a surface.
+    @"send-mouse",
+
+    // Use IPC to send a scroll event to a surface.
+    @"send-scroll",
 
     pub fn detectSpecialCase(arg: []const u8) ?SpecialCase(Action) {
         // If we see a "-e" and we haven't seen a command yet, then
@@ -187,6 +199,9 @@ pub const Action = enum {
             .@"close-surface" => try close_surface.run(alloc),
             .@"resize-surface" => try resize_surface.run(alloc),
             .@"screenshot-surface" => try screenshot_surface.run(alloc),
+            .@"send-key" => try send_key.run(alloc),
+            .@"send-mouse" => try send_mouse.run(alloc),
+            .@"send-scroll" => try send_scroll.run(alloc),
         };
     }
 
@@ -234,6 +249,9 @@ pub const Action = enum {
                 .@"close-surface" => close_surface.Options,
                 .@"resize-surface" => resize_surface.Options,
                 .@"screenshot-surface" => screenshot_surface.Options,
+                .@"send-key" => send_key.Options,
+                .@"send-mouse" => send_mouse.Options,
+                .@"send-scroll" => send_scroll.Options,
             };
         }
     }

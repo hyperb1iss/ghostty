@@ -77,13 +77,13 @@ class IPCSocketServer {
 
         // Try TMPDIR first (macOS sets this per-user)
         if let tmpdir = ProcessInfo.processInfo.environment["TMPDIR"] {
-            let dir = (tmpdir as NSString).appendingPathComponent("ghostty-\(uid)")
-            return (dir as NSString).appendingPathComponent("ghostty.sock")
+            let dir = (tmpdir as NSString).appendingPathComponent("ghostty-automator-\(uid)")
+            return (dir as NSString).appendingPathComponent("ghostty-automator.sock")
         }
 
-        // Fallback to /tmp/ghostty-$UID
-        let dir = "/tmp/ghostty-\(uid)"
-        return (dir as NSString).appendingPathComponent("ghostty.sock")
+        // Fallback to /tmp/ghostty-automator-$UID
+        let dir = "/tmp/ghostty-automator-\(uid)"
+        return (dir as NSString).appendingPathComponent("ghostty-automator.sock")
     }
 
     /// Create the socket directory if it doesn't exist.
