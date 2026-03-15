@@ -453,13 +453,6 @@ pub const Window = extern struct {
             }
             tab.setParentWithContext(p, context);
         }
-        if (command_argv) |argv| command: {
-            const surface = tab.getActiveSurface() orelse break :command;
-            surface.setCommandOverride(argv) catch |err| {
-                log.warn("failed to set command override err={}", .{err});
-            };
-        }
-
         // Get the position that we should insert the new tab at.
         const config = if (priv.config) |v| v.get() else {
             // If we don't have a config we just append it at the end.

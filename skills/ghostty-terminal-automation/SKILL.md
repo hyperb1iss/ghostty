@@ -7,6 +7,20 @@ description: Automate Ghostty terminal sessions via CLI. Use when you need to se
 
 Control Ghostty terminals programmatically using `ghostty-automator +<action>` CLI commands. All IPC actions are built into the Ghostty binary.
 
+## Bootstrap First
+
+Do not assume `+send-text`, `+get-screen`, or other target-specific actions will create a terminal for you. Bootstrap explicitly:
+
+1. Run `ghostty-automator +list-surfaces --format=json`
+2. If it succeeds and returns surfaces, pick one and continue
+3. If it succeeds but returns no surfaces, run `ghostty-automator +new-window`
+4. If it fails because Ghostty is not reachable:
+   - Linux/GTK: run `ghostty-automator +new-window` in the background, then retry discovery
+   - macOS: run `open -ga Ghostty.app` in the background, wait for Ghostty to come up, then run `ghostty-automator +new-window`
+5. Run `ghostty-automator +list-surfaces --format=json` again and use the returned surface ID
+
+Prefer `+new-window` as the bootstrap primitive. Use `+new-tab` only when you already have a reachable instance and want another tab specifically.
+
 ## Discovery
 
 ```bash
@@ -151,7 +165,7 @@ ghostty-automator +new-tab
 
 ## Core Workflow
 
-1. **Discover**: `ghostty-automator +list-surfaces --format=json` — extract a surface ID
+1. **Discover or bootstrap**: `ghostty-automator +list-surfaces --format=json` and create a window if needed
 2. **Read state**: `ghostty-automator +get-screen --surface=<id>` — see what's on screen
 3. **Send command**: `ghostty-automator +send-text --surface=<id> --text="npm test\r"`
 4. **Wait & read**: `sleep 2 && ghostty-automator +get-screen --surface=<id>` — check output
@@ -209,6 +223,7 @@ ghostty-automator +screenshot-surface --surface=<id> --output=/tmp/check.png
 ## Tips
 
 - **Always discover first**: Run `+list-surfaces` before assuming IDs
+- **Creation is explicit**: Bootstrap with `+new-window`; don't expect `+send-text` or `+get-screen` to create a terminal
 - **Use `\r` for Enter**: `+send-text` doesn't auto-append newlines
 - **Poll for output**: Read screen after commands; use `sleep` if needed
 - **Read before acting**: Check screen state to understand context
