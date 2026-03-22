@@ -2,12 +2,11 @@
 #   - Add milestone to a merged PR automatically
 #   - Add milestone to a closed issue that has a merged PR fix (if any)
 
+# Upstream Ghostty workflow — disabled on this fork.
 name: Milestone Action
 on:
-  issues:
-    types: [closed]
-  pull_request_target:
-    types: [closed]
+  push:
+    branches: [upstream-only]
 
 jobs:
   update-milestone:

@@ -1,6 +1,7 @@
+# Upstream Ghostty workflow — disabled on this fork.
 on:
-  issue_comment:
-    types: [created]
+  push:
+    branches: [upstream-only]
 
 name: "Vouch - Manage by Issue"
 

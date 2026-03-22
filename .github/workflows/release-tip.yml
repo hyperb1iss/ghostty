@@ -1,10 +1,9 @@
+# Upstream Ghostty workflow — disabled on this fork.
 on:
-  workflow_run:
-    workflows: [Test]
-    types: [completed]
-    branches: [main]
+  push:
+    branches: [upstream-only]
 
-  workflow_dispatch:
+  # workflow_dispatch:
     inputs:
       pr:
         type: number

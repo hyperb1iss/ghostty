@@ -1,7 +1,8 @@
+# Upstream Ghostty workflow — disabled on this fork (triggers neutered).
+# Kept to minimize rebase conflicts with upstream.
 on:
-  push: {}
-  pull_request: {}
-  workflow_dispatch: {}
+  push:
+    branches: [upstream-only]
 
 name: Test
 

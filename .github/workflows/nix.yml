@@ -1,4 +1,7 @@
-on: [push, pull_request]
+# Upstream Ghostty workflow — disabled on this fork.
+on:
+  push:
+    branches: [upstream-only]
 name: Nix
 
 concurrency:
