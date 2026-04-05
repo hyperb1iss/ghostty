@@ -1,6 +1,14 @@
 # Ghostty Automator — CI/CD Pipeline
 # Triggered by version tags. Builds all platforms, creates GitHub release,
 # updates Homebrew tap.
+#
+# Each build job produces two artifacts:
+#   - binaries-${target}  → raw ghostty-automator binary, consumed by the
+#                           shared homebrew-update workflow (which tars it
+#                           and generates a `bin.install` formula).
+#   - release-${target}   → per-platform tarball/zip with unique filename,
+#                           consumed by the shared github-release workflow
+#                           (which flattens all artifacts onto the release).
 
 name: CI/CD
 
@@ -24,10 +32,10 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -44,65 +52,36 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Package
+      - name: Package — homebrew (CLI + share/ support payload)
         run: |
-          mkdir -p staging
-          # Copy the .app bundle
-          cp -R macos/build/Release/Ghostty.app staging/
-          # Also copy the CLI binary for standalone use
-          cp zig-out/bin/ghostty staging/ 2>/dev/null || true
-          # Copy the skill
-          cp -R skills staging/
-          cd staging
+          mkdir -p brew-staging
+          cp zig-out/bin/ghostty-automator brew-staging/
+          if [ -d zig-out/share ]; then
+            cp -R zig-out/share brew-staging/share
+          fi
+
+      - name: Package — release (.app bundle + CLI + skills)
+        run: |
+          mkdir -p rel-staging
+          cp -R macos/build/Release/Ghostty.app rel-staging/
+          cp zig-out/bin/ghostty-automator rel-staging/
+          cp -R skills rel-staging/
+          cd rel-staging
           zip -r ../ghostty-automator-macos-arm64.zip .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload binaries-macos-arm64
+        uses: actions/upload-artifact@v7
         with:
           name: binaries-macos-arm64
+          path: brew-staging/
+          if-no-files-found: error
+
+      - name: Upload release-macos-arm64
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-arm64
           path: ghostty-automator-macos-arm64.zip
-
-  # ==========================================================================
-  # Build — macOS (Intel)
-  # ==========================================================================
-  build-macos-x86_64:
-    runs-on: macos-13  # Intel runner
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Build GhosttyKit
-        run: |
-          zig build \
-            -Doptimize=ReleaseFast \
-            -Demit-macos-app=false
-
-      - name: Build Ghostty.app
-        run: |
-          cd macos
-          xcodebuild -target Ghostty -configuration Release \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_ALLOWED=NO
-
-      - name: Package
-        run: |
-          mkdir -p staging
-          cp -R macos/build/Release/Ghostty.app staging/
-          cp zig-out/bin/ghostty staging/ 2>/dev/null || true
-          cp -R skills staging/
-          cd staging
-          zip -r ../ghostty-automator-macos-x86_64.zip .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries-macos-x86_64
-          path: ghostty-automator-macos-x86_64.zip
+          if-no-files-found: error
 
   # ==========================================================================
   # Build — Linux x86_64
@@ -111,7 +90,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -121,21 +100,41 @@ jobs:
         run: |
           nix develop -c zig build -Doptimize=ReleaseFast
 
-      - name: Package
+      - name: Package — homebrew (CLI + share/ support payload)
         run: |
-          mkdir -p staging/bin staging/skills staging/share
-          cp zig-out/bin/ghostty staging/bin/
-          cp -R skills/* staging/skills/
-          # Terminfo, shell integration, etc.
-          cp -R zig-out/share/* staging/share/ 2>/dev/null || true
-          cd staging
-          tar czf ../ghostty-automator-linux-x86_64.tar.gz .
+          mkdir -p brew-staging
+          cp zig-out/bin/ghostty-automator brew-staging/
+          if [ -d zig-out/share ]; then
+            cp -R zig-out/share brew-staging/share
+          fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Package — release (full tarball with share/ and skills/)
+        run: |
+          pkg=ghostty-automator-linux-amd64
+          mkdir -p "rel-staging/${pkg}/bin" \
+                   "rel-staging/${pkg}/share" \
+                   "rel-staging/${pkg}/skills"
+          cp zig-out/bin/ghostty-automator "rel-staging/${pkg}/bin/"
+          # Terminfo, shell integration, etc.
+          if [ -d zig-out/share ]; then
+            cp -R zig-out/share/. "rel-staging/${pkg}/share/"
+          fi
+          cp -R skills/. "rel-staging/${pkg}/skills/"
+          (cd rel-staging && tar czf "../${pkg}.tar.gz" "${pkg}")
+
+      - name: Upload binaries-linux-amd64
+        uses: actions/upload-artifact@v7
         with:
           name: binaries-linux-amd64
-          path: ghostty-automator-linux-x86_64.tar.gz
+          path: brew-staging/
+          if-no-files-found: error
+
+      - name: Upload release-linux-amd64
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-amd64
+          path: ghostty-automator-linux-amd64.tar.gz
+          if-no-files-found: error
 
   # ==========================================================================
   # Build — Linux arm64
@@ -144,7 +143,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -154,34 +153,54 @@ jobs:
         run: |
           nix develop -c zig build -Doptimize=ReleaseFast
 
-      - name: Package
+      - name: Package — homebrew (CLI + share/ support payload)
         run: |
-          mkdir -p staging/bin staging/skills staging/share
-          cp zig-out/bin/ghostty staging/bin/
-          cp -R skills/* staging/skills/
-          cp -R zig-out/share/* staging/share/ 2>/dev/null || true
-          cd staging
-          tar czf ../ghostty-automator-linux-arm64.tar.gz .
+          mkdir -p brew-staging
+          cp zig-out/bin/ghostty-automator brew-staging/
+          if [ -d zig-out/share ]; then
+            cp -R zig-out/share brew-staging/share
+          fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Package — release (full tarball with share/ and skills/)
+        run: |
+          pkg=ghostty-automator-linux-arm64
+          mkdir -p "rel-staging/${pkg}/bin" \
+                   "rel-staging/${pkg}/share" \
+                   "rel-staging/${pkg}/skills"
+          cp zig-out/bin/ghostty-automator "rel-staging/${pkg}/bin/"
+          if [ -d zig-out/share ]; then
+            cp -R zig-out/share/. "rel-staging/${pkg}/share/"
+          fi
+          cp -R skills/. "rel-staging/${pkg}/skills/"
+          (cd rel-staging && tar czf "../${pkg}.tar.gz" "${pkg}")
+
+      - name: Upload binaries-linux-arm64
+        uses: actions/upload-artifact@v7
         with:
           name: binaries-linux-arm64
+          path: brew-staging/
+          if-no-files-found: error
+
+      - name: Upload release-linux-arm64
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-arm64
           path: ghostty-automator-linux-arm64.tar.gz
+          if-no-files-found: error
 
   # ==========================================================================
-  # GitHub Release
+  # GitHub Release — uses the unique-named per-platform tarballs/zips
   # ==========================================================================
   github-release:
-    needs: [build-macos-arm64, build-macos-x86_64, build-linux-x86_64, build-linux-arm64]
+    needs: [build-macos-arm64, build-linux-x86_64, build-linux-arm64]
     uses: hyperb1iss/shared-workflows/.github/workflows/github-release.yml@main
     with:
       attach-artifacts: true
-      artifact-pattern: 'binaries-*'
+      artifact-pattern: 'release-*'
     secrets: inherit
 
   # ==========================================================================
-  # Homebrew Tap Update
+  # Homebrew Tap Update — uses the raw binary-only artifacts
   # ==========================================================================
   homebrew:
     needs: [github-release]
@@ -191,5 +210,5 @@ jobs:
       tap-repo: hyperb1iss/homebrew-tap
       description: "Ghostty with built-in terminal automation for AI agents"
       homepage: "https://github.com/hyperb1iss/ghostty-automator"
-      binary-names: "ghostty"
+      binary-names: "ghostty-automator"
     secrets: inherit

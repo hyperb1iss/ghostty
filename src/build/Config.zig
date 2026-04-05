@@ -252,15 +252,30 @@ pub fn init(b: *std.Build, appVersion: []const u8) !Config {
                     app_version.patch,
                 });
 
-                if (!std.mem.eql(u8, tag, expected)) {
-                    @panic("tagged releases must be in vX.Y.Z format matching build.zig");
+                // Accept either a strict "vX.Y.Z" tag or a fork-suffixed
+                // "vX.Y.Z-<suffix>" tag (e.g. v1.3.1-autom8). The suffix is
+                // threaded through the semver pre-release field so it shows
+                // up in `ghostty --version`.
+                if (std.mem.eql(u8, tag, expected)) {
+                    break :version .{
+                        .major = app_version.major,
+                        .minor = app_version.minor,
+                        .patch = app_version.patch,
+                    };
+                } else if (std.mem.startsWith(u8, tag, expected) and
+                    tag.len > expected.len + 1 and
+                    tag[expected.len] == '-')
+                {
+                    break :version .{
+                        .major = app_version.major,
+                        .minor = app_version.minor,
+                        .patch = app_version.patch,
+                        .pre = tag[expected.len + 1 ..],
+                        .build = vsn.short_hash,
+                    };
+                } else {
+                    @panic("tagged releases must be in vX.Y.Z or vX.Y.Z-<suffix> format matching build.zig");
                 }
-
-                break :version .{
-                    .major = app_version.major,
-                    .minor = app_version.minor,
-                    .patch = app_version.patch,
-                };
             }
         }
 
