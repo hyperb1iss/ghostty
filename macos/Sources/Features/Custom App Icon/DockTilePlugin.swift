@@ -138,6 +138,8 @@ private extension NSDockTile {
     }
 }
 
-// This is required because of the DispatchQueue call above. This doesn't
-// feel right but I don't know a better way to solve this.
+// Required for the DispatchQueue.main.async capture below: NSDockTile and
+// NSImage are not Sendable in the Swift 6 sense, but both are used read-only
+// across the dispatch boundary so this is safe in practice.
 extension NSDockTile: @unchecked @retroactive Sendable {}
+extension NSImage: @unchecked @retroactive Sendable {}
