@@ -47,15 +47,12 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
+      # Build GhosttyKit only — the .app requires macOS 26 Tahoe SDK
+      # (NSGlassEffectView, ConcentricRectangle, Swift 6.1 trailing commas)
+      # which is not available on standard GitHub runners. Revisit once
+      # GitHub offers macOS 26 runners or we add a self-hosted runner.
       - name: Build GhosttyKit
         run: |
           zig build \
             -Doptimize=ReleaseSafe \
             -Demit-macos-app=false
-
-      - name: Build Ghostty.app
-        run: |
-          cd macos
-          xcodebuild -target Ghostty -configuration Release \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_ALLOWED=NO
