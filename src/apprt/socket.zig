@@ -552,7 +552,7 @@ test "socket path generation" {
     // Test default path
     const path = try getSocketPath(alloc, null);
     defer alloc.free(path);
-    try std.testing.expect(std.mem.endsWith(u8, path, "ghostty.sock"));
+    try std.testing.expect(std.mem.endsWith(u8, path, "ghostty-automator.sock"));
 
     // Test custom instance
     const custom_path = try getSocketPath(alloc, "my-instance");
