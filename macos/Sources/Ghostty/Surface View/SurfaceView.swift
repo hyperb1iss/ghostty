@@ -522,7 +522,11 @@ extension Ghostty {
         }
 
         private var clipShape: some Shape {
-            return RoundedRectangle(cornerRadius: 8)
+            if #available(iOS 26.0, macOS 26.0, *) {
+                return ConcentricRectangle(corners: .concentric(minimum: 8), isUniform: true)
+            } else {
+                return RoundedRectangle(cornerRadius: 8)
+            }
         }
 
         enum Corner {

@@ -29,13 +29,10 @@ jobs:
   # Build — macOS (Apple Silicon)
   # ==========================================================================
   build-macos-arm64:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
-
-      - name: Select Xcode 16.2
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2.2.1

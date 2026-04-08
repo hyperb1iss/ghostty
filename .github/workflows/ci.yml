@@ -34,13 +34,10 @@ jobs:
         run: nix develop -c zig build test
 
   build-macos:
-    runs-on: macos-14  # Apple Silicon
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-
-      - name: Select Xcode 16.2
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2.2.1

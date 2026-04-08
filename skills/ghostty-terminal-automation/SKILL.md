@@ -5,7 +5,47 @@ description: Automate Ghostty terminal sessions via CLI. Use when you need to se
 
 # Ghostty Terminal Automation
 
-Control Ghostty terminals programmatically using `ghostty-automator +<action>` CLI commands. All IPC actions are built into the Ghostty binary.
+Control Ghostty terminals programmatically using `ghostty-automator +<action>` CLI commands. All IPC actions are built into the single `ghostty-automator` binary.
+
+## Prerequisites
+
+Verify that `ghostty-automator` is installed and on PATH:
+
+```bash
+ghostty-automator --version
+```
+
+If the command is not found, install it using one of the methods below.
+
+## Installation
+
+### Homebrew (macOS and Linux)
+
+```bash
+brew install hyperb1iss/tap/ghostty-automator
+```
+
+### GitHub Releases (direct download)
+
+Download the latest binary for your platform from:
+**https://github.com/hyperb1iss/ghostty-automator/releases/latest**
+
+| Platform | Artifact |
+|----------|----------|
+| macOS ARM64 | `ghostty-automator-macos-arm64.zip` |
+| Linux x86_64 | `ghostty-automator-linux-amd64.tar.gz` |
+| Linux ARM64 | `ghostty-automator-linux-arm64.tar.gz` |
+
+```bash
+# Linux example (x86_64)
+curl -fsSL https://github.com/hyperb1iss/ghostty-automator/releases/latest/download/ghostty-automator-linux-amd64.tar.gz | tar xz
+sudo mv ghostty-automator-linux-amd64/bin/ghostty-automator /usr/local/bin/
+
+# macOS example (ARM64)
+curl -fsSL https://github.com/hyperb1iss/ghostty-automator/releases/latest/download/ghostty-automator-macos-arm64.zip -o ghostty-automator.zip
+unzip ghostty-automator.zip -d ghostty-automator-macos
+sudo mv ghostty-automator-macos/ghostty-automator /usr/local/bin/
+```
 
 ## Bootstrap First
 
@@ -165,11 +205,12 @@ ghostty-automator +new-tab
 
 ## Core Workflow
 
-1. **Discover or bootstrap**: `ghostty-automator +list-surfaces --format=json` and create a window if needed
-2. **Read state**: `ghostty-automator +get-screen --surface=<id>` — see what's on screen
-3. **Send command**: `ghostty-automator +send-text --surface=<id> --text="npm test\r"`
-4. **Wait & read**: `sleep 2 && ghostty-automator +get-screen --surface=<id>` — check output
-5. **Verify**: Screenshot or read again
+1. **Check installation**: `ghostty-automator --version` — install if missing
+2. **Discover or bootstrap**: `ghostty-automator +list-surfaces --format=json` and create a window if needed
+3. **Read state**: `ghostty-automator +get-screen --surface=<id>` — see what's on screen
+4. **Send command**: `ghostty-automator +send-text --surface=<id> --text="npm test\r"`
+5. **Wait & read**: `sleep 2 && ghostty-automator +get-screen --surface=<id>` — check output
+6. **Verify**: Screenshot or read again
 
 ## Examples
 
