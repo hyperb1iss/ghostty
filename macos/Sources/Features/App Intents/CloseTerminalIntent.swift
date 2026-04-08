@@ -8,7 +8,7 @@ struct CloseTerminalIntent: AppIntent {
 
     @Parameter(
         title: "Terminal",
-        description: "The terminal to close.",
+        description: "The terminal to close."
     )
     var terminal: TerminalEntity
 

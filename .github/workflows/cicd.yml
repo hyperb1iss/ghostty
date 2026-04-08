@@ -30,23 +30,20 @@ jobs:
   # ==========================================================================
   build-macos-arm64:
     runs-on: macos-14
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+
+      - name: Select Xcode 16.2
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
       - name: Install Zig
         uses: mlugg/setup-zig@v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      # The .app requires macOS 26 Tahoe SDK (NSGlassEffectView, ConcentricRectangle,
-      # Swift 6.1 trailing commas) — not available on standard GitHub runners.
-      # We ship the CLI binary only until a macOS 26 runner is available.
-      - name: Build GhosttyKit
-        run: |
-          zig build \
-            -Doptimize=ReleaseFast \
-            -Demit-macos-app=false
+      - name: Build
+        run: zig build -Doptimize=ReleaseFast
 
       - name: Package — homebrew (CLI + share/ support payload)
         run: |
@@ -56,10 +53,13 @@ jobs:
             cp -R zig-out/share brew-staging/share
           fi
 
-      - name: Package — release (CLI + skills)
+      - name: Package — release (app + CLI + skills)
         run: |
           mkdir -p rel-staging
           cp zig-out/bin/ghostty-automator rel-staging/
+          if [ -d zig-out/Ghostty.app ]; then
+            cp -R zig-out/Ghostty.app rel-staging/
+          fi
           cp -R skills rel-staging/
           cd rel-staging
           zip -r ../ghostty-automator-macos-arm64.zip .

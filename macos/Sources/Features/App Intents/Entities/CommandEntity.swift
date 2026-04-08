@@ -34,7 +34,7 @@ struct CommandEntity: AppEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: LocalizedStringResource(stringLiteral: command.title),
-            subtitle: LocalizedStringResource(stringLiteral: command.description),
+            subtitle: LocalizedStringResource(stringLiteral: command.description)
         )
     }
 

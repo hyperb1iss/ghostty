@@ -8,7 +8,7 @@ struct FocusTerminalIntent: AppIntent {
 
     @Parameter(
         title: "Terminal",
-        description: "The terminal to focus.",
+        description: "The terminal to focus."
     )
     var terminal: TerminalEntity
 

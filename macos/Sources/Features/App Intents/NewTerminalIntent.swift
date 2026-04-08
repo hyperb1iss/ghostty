@@ -19,7 +19,7 @@ struct NewTerminalIntent: AppIntent {
 
     @Parameter(
         title: "Command",
-        description: "Command to execute within your configured shell.",
+        description: "Command to execute within your configured shell."
     )
     var command: String?
 
