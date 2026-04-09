@@ -1,10 +1,14 @@
 # Terminal Automation Protocol
 
-**Status:** Accepted
+**Status:** Draft (not yet submitted upstream)
 **Version:** 1
 **Author:** Stefanie Jane
 **Created:** 2025-12-29
-**Updated:** 2026-02-12
+**Updated:** 2026-04-09
+
+> **Note:** This RFC has not been submitted to the Ghostty project for review.
+> It documents the protocol as implemented in this fork, with the intent of
+> proposing it upstream in the future.
 
 ## Summary
 
