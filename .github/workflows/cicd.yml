@@ -45,7 +45,8 @@ jobs:
       - name: Package — homebrew (CLI + share/ support payload)
         run: |
           mkdir -p brew-staging
-          cp zig-out/bin/ghostty-automator brew-staging/
+          # On macOS the CLI binary lives inside the app bundle
+          cp zig-out/Ghostty.app/Contents/MacOS/Ghostty brew-staging/ghostty-automator
           if [ -d zig-out/share ]; then
             cp -R zig-out/share brew-staging/share
           fi
@@ -53,10 +54,9 @@ jobs:
       - name: Package — release (app + CLI + skills)
         run: |
           mkdir -p rel-staging
-          cp zig-out/bin/ghostty-automator rel-staging/
-          if [ -d zig-out/Ghostty.app ]; then
-            cp -R zig-out/Ghostty.app rel-staging/
-          fi
+          cp -R zig-out/Ghostty.app rel-staging/
+          # Also ship the CLI binary at the top level for direct use
+          cp zig-out/Ghostty.app/Contents/MacOS/Ghostty rel-staging/ghostty-automator
           cp -R skills rel-staging/
           cd rel-staging
           zip -r ../ghostty-automator-macos-arm64.zip .
