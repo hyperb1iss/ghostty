@@ -148,7 +148,7 @@ Maximum message size: **16 MB** (accommodates screenshot data).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `version` | u32 | Yes | Protocol version. Must be `1`. GTK accepts any value; macOS enforces `1`. |
+| `version` | u32 | Yes | Protocol version. Must be `1`. Both servers reject other values. |
 | `target` | string | No | Ghostty instance class name. Currently ignored by both servers — reserved for multi-instance routing. |
 | `action` | object | Yes | Tagged union: single key is the action name, value is the payload. |
 
@@ -551,10 +551,9 @@ is echoed in the response data.
 path components (validated per-component via tokenization). This prevents
 directory traversal attacks.
 
-> **Security note:** The current validation is path-string-based and does not
-> prevent symlink-following or TOCTOU attacks on the output path. The file is
-> written to whatever the OS resolves the path to. A future hardening pass
-> should use `O_NOFOLLOW` or write to a temp file and rename.
+> **Security note:** Screenshots are staged through a temporary file and then
+> renamed into place, which avoids following a pre-existing symlink at the
+> final output path.
 
 ### Window & Surface Management
 
@@ -573,11 +572,7 @@ Opens a new Ghostty window.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `arguments` | string[]? | Command arguments for the new window's shell. `null` for default shell. |
-
-> **Platform note:** On macOS, `arguments` are passed to the new shell. On GTK,
-> `arguments` are accepted but not yet wired through — the action creates a
-> window with the default shell and logs a message if arguments were provided.
+| `arguments` | string[]? | Arguments parsed like `ghostty +new-window`. Use `--working-directory=...`, `--command=...`, `--title=...`, or `-e cmd ...`. `null` uses the default behavior. |
 
 #### `new_tab`
 
@@ -592,8 +587,9 @@ Opens a new tab in the most recently focused window.
 }
 ```
 
-> **Platform note:** Same limitation as `new_window` — GTK does not yet honor
-> the `arguments` field.
+| Field | Type | Description |
+|-------|------|-------------|
+| `arguments` | string[]? | Command arguments for the new tab, matching `ghostty +new-tab -e ...`. `null` uses the default command. |
 
 #### `focus_surface`
 

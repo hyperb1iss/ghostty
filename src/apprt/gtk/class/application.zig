@@ -1851,6 +1851,146 @@ pub const Application = extern struct {
         }
     }
 
+    pub fn ipcNewWindow(self: *Self, arguments: ?[]const []const u8) bool {
+        var arena: std.heap.ArenaAllocator = .init(Application.default().allocator());
+        defer arena.deinit();
+
+        const alloc = arena.allocator();
+
+        var working_directory: ?[:0]const u8 = null;
+        var title: ?[:0]const u8 = null;
+        var command: ?configpkg.Command = null;
+        var args: std.ArrayList([:0]const u8) = .empty;
+        var e_seen = false;
+
+        if (arguments) |argv| {
+            for (argv, 0..) |arg, i| {
+                log.debug("ipc new-window argument: {d} {s}", .{ i, arg });
+
+                if (e_seen) {
+                    const cpy = alloc.dupeZ(u8, arg) catch |err| {
+                        log.warn("unable to duplicate argument {d} {s}: {t}", .{ i, arg, err });
+                        return false;
+                    };
+                    args.append(alloc, cpy) catch |err| {
+                        log.warn("unable to append argument {d} {s}: {t}", .{ i, arg, err });
+                        return false;
+                    };
+                    continue;
+                }
+
+                if (std.mem.eql(u8, arg, "-e")) {
+                    e_seen = true;
+                    continue;
+                }
+
+                if (lib.cutPrefix(u8, arg, "--command=")) |v| {
+                    var cmd: configpkg.Command = undefined;
+                    cmd.parseCLI(alloc, v) catch |err| {
+                        log.warn("unable to parse command: {t}", .{err});
+                        continue;
+                    };
+                    command = cmd;
+                    continue;
+                }
+
+                if (lib.cutPrefix(u8, arg, "--working-directory=")) |v| {
+                    working_directory = alloc.dupeZ(u8, std.mem.trim(u8, v, &std.ascii.whitespace)) catch |err| {
+                        log.warn("unable to duplicate working directory: {t}", .{err});
+                        return false;
+                    };
+                    continue;
+                }
+
+                if (lib.cutPrefix(u8, arg, "--title=")) |v| {
+                    title = alloc.dupeZ(u8, std.mem.trim(u8, v, &std.ascii.whitespace)) catch |err| {
+                        log.warn("unable to duplicate title: {t}", .{err});
+                        return false;
+                    };
+                    continue;
+                }
+            }
+        }
+
+        if (e_seen and args.items.len == 0) {
+            log.warn("ipc new-window requested -e without a command", .{});
+            return false;
+        }
+
+        if (args.items.len > 0) {
+            command = .{ .direct = args.items };
+        }
+
+        Action.newWindow(self, null, .{
+            .command = command,
+            .working_directory = working_directory,
+            .title = title,
+        }) catch |err| {
+            log.warn("unable to create new window: {t}", .{err});
+            return false;
+        };
+
+        return true;
+    }
+
+    pub fn ipcNewTab(self: *Self, arguments: ?[]const []const u8) bool {
+        var arena: std.heap.ArenaAllocator = .init(Application.default().allocator());
+        defer arena.deinit();
+
+        const alloc = arena.allocator();
+
+        var argv: std.ArrayList([:0]const u8) = .empty;
+        if (arguments) |args| {
+            if (args.len == 0) return false;
+
+            for (args) |arg| {
+                argv.append(alloc, alloc.dupeZ(u8, arg) catch |err| {
+                    log.warn("unable to duplicate new-tab argument: {t}", .{err});
+                    return false;
+                }) catch |err| {
+                    log.warn("unable to append new-tab argument: {t}", .{err});
+                    return false;
+                };
+            }
+        }
+
+        if (argv.items.len > 0) {
+            if (self.core().focusedSurface()) |focused| {
+                const surface = focused.rt_surface.surface;
+                const window = ext.getAncestor(
+                    Window,
+                    surface.as(gtk.Widget),
+                ) orelse {
+                    log.warn("surface is not in a window, creating new window", .{});
+                    Action.newWindow(self, null, .{
+                        .command = .{ .direct = argv.items },
+                    }) catch |err| {
+                        log.warn("failed to create new window err={}", .{err});
+                        return false;
+                    };
+                    return true;
+                };
+
+                window.newTab(focused, argv.items);
+                return true;
+            }
+
+            Action.newWindow(self, null, .{
+                .command = .{ .direct = argv.items },
+            }) catch |err| {
+                log.warn("failed to create new window err={}", .{err});
+                return false;
+            };
+            return true;
+        }
+
+        if (self.core().focusedSurface()) |focused| {
+            return Action.newTab(.{ .surface = focused });
+        }
+
+        return self.ipcNewWindow(null);
+    }
+
     pub fn actionOpenConfig(
         _: *gio.SimpleAction,
         _: ?*glib.Variant,

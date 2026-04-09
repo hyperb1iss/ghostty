@@ -328,7 +328,7 @@ pub const Action = union(enum) {
     };
 
     pub const NewWindow = struct {
-        /// A list of command arguments to launch in the new window. If this is
+        /// A list of arguments parsed like `ghostty +new-window`. If this is
         /// `null` the command configured in the config or the user's default
         /// shell should be launched.
         ///

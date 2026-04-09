@@ -71,10 +71,7 @@ pub fn Server(comptime App: type) type {
             dir.chmod(0o700) catch {};
 
             // Remove existing socket file
-            std.fs.deleteFileAbsolute(socket_path) catch |err| switch (err) {
-                error.FileNotFound => {},
-                else => return err,
-            };
+            try socket_client.removeSocketFile(socket_path);
 
             // Create socket
             const socket_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
@@ -175,7 +172,7 @@ pub fn Server(comptime App: type) type {
 
             const request = self.readRequest(client_fd, alloc) catch |err| {
                 log.err("failed to read request: {}", .{err});
-                self.sendError(client_fd, "Failed to read request");
+                self.sendReadError(client_fd, err);
                 return;
             };
 
@@ -237,12 +234,14 @@ pub fn Server(comptime App: type) type {
             try readExact(client_fd, buf);
 
             // Parse JSON
-            return try std.json.parseFromSliceLeaky(
+            const request = try std.json.parseFromSliceLeaky(
                 Request,
                 alloc,
                 buf,
                 .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
             );
+            try socket_client.validateRequestVersion(request);
+            return request;
         }
 
         fn sendResponse(self: *Self, client_fd: posix.socket_t, alloc: Allocator, response: Response) !void {
@@ -266,6 +265,13 @@ pub fn Server(comptime App: type) type {
                 .ok = false,
                 .@"error" = message,
             }) catch {};
+        }
+
+        fn sendReadError(self: *Self, client_fd: posix.socket_t, err: anyerror) void {
+            switch (err) {
+                error.UnsupportedProtocolVersion => self.sendError(client_fd, "Unsupported protocol version"),
+                else => self.sendError(client_fd, "Failed to read request"),
+            }
         }
     };
 }

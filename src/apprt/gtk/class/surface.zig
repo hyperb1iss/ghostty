@@ -34,6 +34,7 @@ const ClipboardConfirmationDialog = @import("clipboard_confirmation_dialog.zig")
 const TitleDialog = @import("title_dialog.zig").TitleDialog;
 const Window = @import("window.zig").Window;
 const InspectorWindow = @import("inspector_window.zig").InspectorWindow;
+const surface_registry = @import("../ipc/surface_registry.zig");
 const i18n = @import("../../../os/i18n.zig");
 
 const log = std.log.scoped(.gtk_ghostty_surface);
@@ -2027,6 +2028,7 @@ pub const Surface = extern struct {
         const alloc = Application.default().allocator();
         const priv = self.private();
         if (priv.core_surface) |v| {
+            surface_registry.unregister(self);
             // Remove ourselves from the list of known surfaces in the app.
             // We do this before deinit in case a callback triggers
             // searching for this surface.
@@ -3564,6 +3566,9 @@ pub const Surface = extern struct {
 
         // Store it!
         priv.core_surface = surface;
+        surface_registry.register(self) catch |err| {
+            log.warn("failed to register surface for IPC lookup err={}", .{err});
+        };
 
         // Emit the signal that we initialized the surface.
         Surface.signals.init.impl.emit(

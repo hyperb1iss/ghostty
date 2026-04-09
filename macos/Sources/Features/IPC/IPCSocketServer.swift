@@ -3,6 +3,55 @@ import Foundation
 import OSLog
 import GhosttyKit
 
+private final class IPCWeakSurfaceRef {
+    weak var surface: Ghostty.SurfaceView?
+
+    init(_ surface: Ghostty.SurfaceView) {
+        self.surface = surface
+    }
+}
+
+enum IPCSurfaceRegistry {
+    private static let lock = NSLock()
+    private static var surfaces: [String: IPCWeakSurfaceRef] = [:]
+
+    static func identifier(for surface: Ghostty.SurfaceView) -> String {
+        String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+    }
+
+    static func register(_ surface: Ghostty.SurfaceView) {
+        lock.lock()
+        defer { lock.unlock() }
+        surfaces[identifier(for: surface)] = IPCWeakSurfaceRef(surface)
+    }
+
+    static func unregister(_ surface: Ghostty.SurfaceView) {
+        lock.lock()
+        defer { lock.unlock() }
+        surfaces.removeValue(forKey: identifier(for: surface))
+    }
+
+    static func surface(for identifier: String) -> Ghostty.SurfaceView? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let ref = surfaces[identifier] else { return nil }
+        guard let surface = ref.surface else {
+            surfaces.removeValue(forKey: identifier)
+            return nil
+        }
+
+        return surface
+    }
+}
+
+private extension String {
+    func strippingPrefix(_ prefix: String) -> String? {
+        guard hasPrefix(prefix) else { return nil }
+        return String(dropFirst(prefix.count))
+    }
+}
+
 /// Unix socket server for IPC communication.
 ///
 /// This provides remote control capabilities matching the protocol in `src/apprt/socket.zig`.
@@ -62,7 +111,11 @@ class IPCSocketServer {
         }
 
         if !socketPath.isEmpty {
-            unlink(socketPath)
+            do {
+                try removeSocketFileIfPresent(socketPath)
+            } catch {
+                logger.error("Failed to remove IPC socket path \(self.socketPath): \(error.localizedDescription)")
+            }
             socketPath = ""
         }
 
@@ -99,8 +152,7 @@ class IPCSocketServer {
     // MARK: - Socket Creation
 
     private func createSocket() throws {
-        // Remove existing socket file if present
-        unlink(socketPath)
+        try removeSocketFileIfPresent(socketPath)
 
         // Create the socket
         socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -277,13 +329,12 @@ class IPCSocketServer {
                 throw IPCError.appUnavailable
             }
 
-            var config = Ghostty.SurfaceConfiguration()
-            if let args = payload?.arguments {
-                guard !args.isEmpty else { throw IPCError.invalidArguments }
-                config.initialInput = "exec \(shellQuoteArguments(args))\n"
-            }
-
-            _ = TerminalController.newWindow(appDelegate.ghostty, withBaseConfig: config)
+            let launchOptions = try self.parseNewWindowLaunchOptions(payload?.arguments)
+            let controller = TerminalController.newWindow(
+                appDelegate.ghostty,
+                withBaseConfig: launchOptions.config
+            )
+            controller.titleOverride = launchOptions.titleOverride
         }
 
         switch result {
@@ -301,11 +352,7 @@ class IPCSocketServer {
                 throw IPCError.appUnavailable
             }
 
-            var config = Ghostty.SurfaceConfiguration()
-            if let args = payload?.arguments {
-                guard !args.isEmpty else { throw IPCError.invalidArguments }
-                config.initialInput = "exec \(shellQuoteArguments(args))\n"
-            }
+            let config = try self.makeExecLaunchConfig(arguments: payload?.arguments)
 
             // Get the preferred parent window for the new tab
             let parentWindow = TerminalController.preferredParent?.window
@@ -648,7 +695,7 @@ class IPCSocketServer {
 
             // Write to file - use standardized URL to resolve any remaining path issues
             let url = URL(fileURLWithPath: outputPath).standardized
-            try pngData.write(to: url)
+            try pngData.write(to: url, options: [.atomic])
         }
 
         switch result {
@@ -698,14 +745,7 @@ class IPCSocketServer {
 
             // If button is specified, send button event
             if let buttonStr = payload.button, let actionStr = payload.button_action {
-                // Parse button
-                let button: Ghostty.Input.MouseButton
-                switch buttonStr.lowercased() {
-                case "left": button = .left
-                case "right": button = .right
-                case "middle": button = .middle
-                default: button = .unknown
-                }
+                let button = try self.parseMouseButton(buttonStr)
 
                 // Parse action
                 let action: Ghostty.Input.MouseState
@@ -833,6 +873,10 @@ class IPCSocketServer {
 
     /// Find a surface by its hex ID (e.g., "0x153872000")
     private func findSurface(byId surfaceId: String) -> Ghostty.SurfaceView? {
+        if let surface = IPCSurfaceRegistry.surface(for: surfaceId) {
+            return surface
+        }
+
         for window in NSApp.windows {
             guard let controller = window.windowController as? TerminalController else {
                 continue
@@ -840,8 +884,9 @@ class IPCSocketServer {
 
             // Check surfaces in this window's tree
             for surface in controller.surfaceTree {
-                let id = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+                let id = IPCSurfaceRegistry.identifier(for: surface)
                 if id == surfaceId {
+                    IPCSurfaceRegistry.register(surface)
                     return surface
                 }
             }
@@ -853,8 +898,9 @@ class IPCSocketServer {
                         continue
                     }
                     for surface in tabController.surfaceTree {
-                        let id = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+                        let id = IPCSurfaceRegistry.identifier(for: surface)
                         if id == surfaceId {
+                            IPCSurfaceRegistry.register(surface)
                             return surface
                         }
                     }
@@ -867,7 +913,8 @@ class IPCSocketServer {
     private func collectSurfaces(from tree: SplitTree<Ghostty.SurfaceView>, into surfaces: inout [IPCResponse.SurfaceInfo]) {
         // SplitTree conforms to Sequence, iterating yields all leaf views
         for surface in tree {
-            let surfaceId = String(format: "0x%lx", UInt(bitPattern: ObjectIdentifier(surface)))
+            IPCSurfaceRegistry.register(surface)
+            let surfaceId = IPCSurfaceRegistry.identifier(for: surface)
             surfaces.append(IPCResponse.SurfaceInfo(
                 id: surfaceId,
                 title: surface.title ?? "",
@@ -999,6 +1046,148 @@ class IPCSocketServer {
             result = Result { try body() }.mapError { IPCError.from($0) }
         }
         return result
+    }
+
+    private func removeSocketFileIfPresent(_ path: String) throws {
+        var info = stat()
+        let result = path.withCString { lstat($0, &info) }
+        guard result == 0 else {
+            if errno == ENOENT { return }
+            throw IPCError.fileSystem("Socket path inspection failed (errno=\(errno))")
+        }
+
+        guard (info.st_mode & S_IFMT) == S_IFSOCK else {
+            throw IPCError.socketPathOccupied(path)
+        }
+
+        guard path.withCString({ unlink($0) }) == 0 else {
+            throw IPCError.fileSystem("Socket unlink failed (errno=\(errno))")
+        }
+    }
+
+    private struct NewWindowLaunchOptions {
+        var config = Ghostty.SurfaceConfiguration()
+        var titleOverride: String?
+    }
+
+    private enum LaunchCommand {
+        case shell(String)
+        case exec([String])
+    }
+
+    private func parseNewWindowLaunchOptions(_ arguments: [String]?) throws -> NewWindowLaunchOptions {
+        var result = NewWindowLaunchOptions()
+        guard let arguments else { return result }
+        guard !arguments.isEmpty else { throw IPCError.invalidArguments }
+
+        var command: LaunchCommand?
+        var execMode = false
+        var execArguments: [String] = []
+
+        for argument in arguments {
+            if execMode {
+                execArguments.append(argument)
+                continue
+            }
+
+            if argument == "-e" {
+                execMode = true
+                continue
+            }
+
+            if let value = argument.strippingPrefix("--command=") {
+                command = try parseCommandOverride(value)
+                continue
+            }
+
+            if let value = argument.strippingPrefix("--working-directory=") {
+                result.config.workingDirectory = try parseWorkingDirectoryOverride(value)
+                continue
+            }
+
+            if let value = argument.strippingPrefix("--title=") {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                result.titleOverride = trimmed.isEmpty ? nil : trimmed
+            }
+        }
+
+        if !execArguments.isEmpty {
+            command = .exec(execArguments)
+        } else if execMode {
+            throw IPCError.invalidArguments
+        }
+
+        switch command {
+        case .shell(let value):
+            result.config.command = value
+        case .exec(let value):
+            result.config.initialInput = "exec \(shellQuoteArguments(value))\n"
+        case .none:
+            break
+        }
+
+        return result
+    }
+
+    private func makeExecLaunchConfig(arguments: [String]?) throws -> Ghostty.SurfaceConfiguration {
+        var config = Ghostty.SurfaceConfiguration()
+        guard let arguments else { return config }
+        guard !arguments.isEmpty else { throw IPCError.invalidArguments }
+        config.initialInput = "exec \(shellQuoteArguments(arguments))\n"
+        return config
+    }
+
+    private func parseCommandOverride(_ value: String) throws -> LaunchCommand {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw IPCError.invalidArguments }
+
+        if let direct = trimmed.strippingPrefix("direct:") {
+            let arguments = direct
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(whereSeparator: \.isWhitespace)
+                .map(String.init)
+            guard !arguments.isEmpty else { throw IPCError.invalidArguments }
+            return .exec(arguments)
+        }
+
+        if let shell = trimmed.strippingPrefix("shell:") {
+            let command = shell.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !command.isEmpty else { throw IPCError.invalidArguments }
+            return .shell(command)
+        }
+
+        return .shell(trimmed)
+    }
+
+    private func parseWorkingDirectoryOverride(_ value: String) throws -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw IPCError.invalidArguments }
+
+        switch trimmed {
+        case "home":
+            return NSHomeDirectory()
+        case "inherit":
+            return nil
+        default:
+            return trimmed
+        }
+    }
+
+    private func parseMouseButton(_ value: String) throws -> Ghostty.Input.MouseButton {
+        switch value.lowercased() {
+        case "left": return .left
+        case "right": return .right
+        case "middle": return .middle
+        case "four": return .four
+        case "five": return .five
+        case "six": return .six
+        case "seven": return .seven
+        case "eight": return .eight
+        case "nine": return .nine
+        case "ten": return .ten
+        case "eleven": return .eleven
+        default: throw IPCError.invalidArguments
+        }
     }
 
     private func shellQuoteArguments(_ arguments: [String]) -> String {
@@ -1223,6 +1412,7 @@ enum IPCError: LocalizedError {
     case bindFailed(Int32)
     case listenFailed(Int32)
     case pathTooLong
+    case socketPathOccupied(String)
     case appUnavailable
     case invalidArguments
     case surfaceNotFound
@@ -1230,10 +1420,17 @@ enum IPCError: LocalizedError {
     case readFailed(Int32)
     case sendFailed(Int32)
     case connectionClosed
+    case fileSystem(String)
 
     static func from(_ error: Error) -> IPCError {
         if let err = error as? IPCError { return err }
-        return .appUnavailable
+
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain {
+            return .fileSystem("Filesystem error (errno=\(nsError.code))")
+        }
+
+        return .fileSystem(nsError.localizedDescription)
     }
 
     var errorDescription: String? {
@@ -1246,6 +1443,8 @@ enum IPCError: LocalizedError {
             return "Socket listen failed (errno=\(e))"
         case .pathTooLong:
             return "Socket path too long"
+        case .socketPathOccupied(let path):
+            return "Socket path is occupied by a non-socket file: \(path)"
         case .appUnavailable:
             return "App not available"
         case .invalidArguments:
@@ -1260,6 +1459,8 @@ enum IPCError: LocalizedError {
             return "Socket send failed (errno=\(e))"
         case .connectionClosed:
             return "Connection closed"
+        case .fileSystem(let message):
+            return message
         }
     }
 }

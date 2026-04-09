@@ -39,6 +39,11 @@ fn readExact(socket: posix.socket_t, buf: []u8) !void {
 /// Default socket filename for the primary instance.
 pub const default_socket_name = "ghostty-automator.sock";
 
+pub const SocketPathError = error{
+    RefuseToDeleteNonSocket,
+    UnsupportedProtocolVersion,
+};
+
 /// JSON request sent to the socket server.
 pub const Request = struct {
     /// Protocol version for future compatibility.
@@ -102,7 +107,7 @@ pub const Request = struct {
         };
 
         pub const NewWindowPayload = struct {
-            /// Command arguments to run in the new window.
+            /// Arguments parsed like `ghostty +new-window`.
             arguments: ?[]const []const u8 = null,
         };
 
@@ -245,6 +250,29 @@ pub fn getSocketPath(alloc: Allocator, instance: ?[]const u8) ![]u8 {
     defer alloc.free(sock_filename);
 
     return try std.fs.path.join(alloc, &.{ dir, sock_filename });
+}
+
+pub fn removeSocketFile(path: []const u8) (posix.FStatAtError || std.fs.DeleteFileError || SocketPathError)!void {
+    if (builtin.os.tag == .windows) return;
+
+    const stat = posix.fstatat(
+        std.fs.cwd().fd,
+        path,
+        posix.AT.SYMLINK_NOFOLLOW,
+    ) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => return err,
+    };
+
+    if (std.fs.File.Stat.fromPosix(stat).kind != .unix_domain_socket) {
+        return error.RefuseToDeleteNonSocket;
+    }
+
+    try std.fs.deleteFileAbsolute(path);
+}
+
+pub fn validateRequestVersion(request: Request) SocketPathError!void {
+    if (request.version != 1) return error.UnsupportedProtocolVersion;
 }
 
 /// Serialize an IPC action to a JSON request.

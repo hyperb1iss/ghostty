@@ -22,6 +22,7 @@ const Application = @import("class/application.zig").Application;
 const Window = @import("class/window.zig").Window;
 const Tab = @import("class/tab.zig").Tab;
 const Surface = @import("class/surface.zig").Surface;
+const surface_registry = @import("ipc/surface_registry.zig");
 
 const log = std.log.scoped(.gtk_ipc);
 
@@ -276,71 +277,24 @@ pub fn screenshotSurface(app: *Application, alloc: Allocator, surface_id: []cons
         return ipc.err("Surface not found");
     };
 
-    // Create a null-terminated copy of the output path
-    const path_z = alloc.dupeZ(u8, output_path) catch {
-        return ipc.err("Failed to allocate path");
-    };
-
-    if (!surface.screenshotToFile(path_z)) {
+    writeScreenshotAtomically(alloc, surface, output_path) catch |err| {
+        log.warn("screenshot failed path={s} err={}", .{ output_path, err });
         return ipc.err("Failed to capture screenshot");
-    }
+    };
 
     return ipc.success();
 }
 
 /// Create a new window.
 pub fn newWindow(app: *Application, arguments: ?[]const []const u8) Response {
-    // TODO(#7): Wire command arguments through to surface creation.
-    // Requires extending the core app mailbox to carry spawn args for
-    // new_window/new_tab, which currently only accept void payloads.
-    if (arguments) |args| {
-        if (args.len > 0) {
-            log.info("new_window: command arguments provided but not yet supported on GTK ({d} args)", .{args.len});
-        }
-    }
-
-    // Queue a new window action via the application
-    _ = app.performAction(.app, .new_window, {}) catch {
-        return ipc.err("Failed to create new window");
-    };
-
+    if (!app.ipcNewWindow(arguments)) return ipc.err("Failed to create new window");
     return ipc.success();
 }
 
 /// Create a new tab.
 pub fn newTab(app: *Application, arguments: ?[]const []const u8) Response {
-    // TODO(#7): Wire command arguments through to surface creation (see newWindow).
-    if (arguments) |args| {
-        if (args.len > 0) {
-            log.info("new_tab: command arguments provided but not yet supported on GTK ({d} args)", .{args.len});
-        }
-    }
-
-    // Get the focused window for the new tab
-    const window_list = gtk.Window.listToplevels();
-    defer window_list.free();
-
-    var target_window: ?*Window = null;
-    var node: ?*glib.List = @ptrCast(window_list);
-    while (node) |n| : (node = n.f_next) {
-        const data = n.f_data orelse continue;
-        const widget: *gtk.Widget = @ptrCast(@alignCast(data));
-        if (!gobject.ext.isA(widget, Window)) continue;
-        const window: *Window = @ptrCast(widget);
-        if (window.as(gtk.Window).isActive() != 0) {
-            target_window = window;
-            break;
-        }
-    }
-
-    if (target_window) |window| {
-        // Create new tab in this window using the action
-        _ = window.as(gtk.Widget).activateAction("win.new-tab", null);
-        return ipc.success();
-    } else {
-        // No active window, create a new window instead
-        return newWindow(app, null);
-    }
+    if (!app.ipcNewTab(arguments)) return ipc.err("Failed to create new tab");
+    return ipc.success();
 }
 
 // ============================================================================
@@ -365,6 +319,10 @@ fn parseObjectId(id: []const u8) ?usize {
 fn findSurfaceById(surface_id: []const u8) ?*Surface {
     const target_ptr = parseObjectId(surface_id) orelse return null;
 
+    if (surface_registry.get(target_ptr)) |surface| {
+        return @ptrCast(@alignCast(surface));
+    }
+
     // Iterate all windows to find the surface
     const window_list = gtk.Window.listToplevels();
     defer window_list.free();
@@ -378,11 +336,57 @@ fn findSurfaceById(surface_id: []const u8) ?*Surface {
 
         // Check surfaces in this window's tabs
         if (findSurfaceInWindow(window, target_ptr)) |surface| {
+            surface_registry.register(surface) catch |err| {
+                log.debug("surface registry update failed err={}", .{err});
+            };
             return surface;
         }
     }
 
     return null;
+}
+
+fn writeScreenshotAtomically(alloc: Allocator, surface: *Surface, output_path: []const u8) !void {
+    const dir_path = std.fs.path.dirname(output_path) orelse "/";
+    const base_name = std.fs.path.basename(output_path);
+    var dir = try std.fs.openDirAbsolute(dir_path, .{});
+    defer dir.close();
+
+    const temp_path = try uniqueScreenshotTempPath(alloc, dir_path, base_name);
+    defer alloc.free(temp_path);
+
+    const temp_name = std.fs.path.basename(temp_path);
+    const temp_path_z = try alloc.dupeZ(u8, temp_path);
+    defer alloc.free(temp_path_z);
+
+    var cleanup_temp = true;
+    defer if (cleanup_temp) dir.deleteFile(temp_name) catch {};
+
+    if (!surface.screenshotToFile(temp_path_z)) return error.ScreenshotFailed;
+
+    try dir.rename(temp_name, base_name);
+    cleanup_temp = false;
+}
+
+fn uniqueScreenshotTempPath(alloc: Allocator, dir_path: []const u8, base_name: []const u8) ![]u8 {
+    var attempt: u8 = 0;
+    while (attempt < 32) : (attempt += 1) {
+        const path = try std.fmt.allocPrint(
+            alloc,
+            "{s}/.{s}.ghostty-screenshot-{x}",
+            .{ dir_path, base_name, std.crypto.random.int(u64) },
+        );
+        errdefer alloc.free(path);
+
+        std.fs.accessAbsolute(path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return path,
+            else => return err,
+        };
+
+        alloc.free(path);
+    }
+
+    return error.NoSpaceLeft;
 }
 
 /// Find a surface in a window by pointer value.

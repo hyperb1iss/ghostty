@@ -399,6 +399,7 @@ extension Ghostty {
                 return
             }
             self.surfaceModel = Ghostty.Surface(cSurface: surface)
+            IPCSurfaceRegistry.register(self)
 
             // Setup our tracking area so we get mouse moved events
             updateTrackingAreas()
@@ -412,6 +413,8 @@ extension Ghostty {
         }
 
         deinit {
+            IPCSurfaceRegistry.unregister(self)
+
             // Remove all of our notificationcenter subscriptions
             let center = NotificationCenter.default
             center.removeObserver(self)

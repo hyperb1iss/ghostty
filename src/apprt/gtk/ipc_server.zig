@@ -1,9 +1,7 @@
 //! GTK IPC server integration.
 //!
-//! This module provides the socket server for GTK, integrating with GLib's
-//! main loop for event-driven socket handling. Client I/O runs on spawned
-//! threads to avoid blocking the GTK main loop, while request handlers
-//! execute on the main thread via glib.idleAdd (required for GTK access).
+//! Client I/O happens on worker threads so the GTK main loop only handles the
+//! actual widget interactions via `glib.idleAdd`.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -20,8 +18,8 @@ const log = std.log.scoped(.gtk_ipc_server);
 /// Maximum message size (16 MB for screenshots).
 const max_message_size: usize = 16 * 1024 * 1024;
 
-/// Poll interval in milliseconds.
-const poll_interval_ms: c_uint = 100;
+/// Maximum number of concurrent client threads.
+const max_concurrent_clients: u32 = 8;
 
 /// Context passed from client thread to main thread via glib.idleAdd.
 const ClientDispatch = struct {
@@ -42,8 +40,12 @@ pub const Server = struct {
     alloc: Allocator,
     socket_fd: posix.socket_t,
     socket_path: []u8,
-    timer_id: c_uint,
     app: *Application,
+    accept_thread: ?std.Thread = null,
+    client_mutex: std.Thread.Mutex = .{},
+    client_cond: std.Thread.Condition = .{},
+    active_clients: u32 = 0,
+    shutting_down: bool = false,
 
     /// Initialize and start the server.
     pub fn init(alloc: Allocator, app: *Application, instance: ?[]const u8) !*Server {
@@ -63,10 +65,7 @@ pub const Server = struct {
         dir.chmod(0o700) catch {};
 
         // Remove existing socket file
-        std.fs.deleteFileAbsolute(socket_path) catch |e| switch (e) {
-            error.FileNotFound => {},
-            else => return e,
-        };
+        try socket_client.removeSocketFile(socket_path);
 
         // Create socket
         const socket_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
@@ -93,24 +92,18 @@ pub const Server = struct {
         // Listen for connections
         try posix.listen(socket_fd, 5);
 
-        // Set non-blocking
-        const flags = try posix.fcntl(socket_fd, posix.F.GETFL, 0);
-        _ = try posix.fcntl(socket_fd, posix.F.SETFL, @as(u32, @intCast(flags)) | @as(u32, @bitCast(posix.O{ .NONBLOCK = true })));
-
         // Create the server struct
         const self = try alloc.create(Server);
         errdefer alloc.destroy(self);
-
-        // Create GLib timeout to poll the socket
-        const timer_id = glib.timeoutAdd(poll_interval_ms, pollCallback, self);
 
         self.* = .{
             .alloc = alloc,
             .socket_fd = socket_fd,
             .socket_path = socket_path,
-            .timer_id = timer_id,
             .app = app,
         };
+
+        self.accept_thread = try std.Thread.spawn(.{}, acceptLoop, .{self});
 
         log.info("IPC server listening on {s}", .{socket_path});
         return self;
@@ -118,16 +111,25 @@ pub const Server = struct {
 
     /// Stop the server and clean up.
     pub fn deinit(self: *Server) void {
-        // Remove the GLib timer
-        if (self.timer_id != 0) {
-            _ = glib.Source.remove(self.timer_id);
-        }
+        self.client_mutex.lock();
+        self.shutting_down = true;
+        self.client_mutex.unlock();
 
         // Close socket
         posix.close(self.socket_fd);
 
+        if (self.accept_thread) |thread| {
+            thread.join();
+        }
+
+        self.client_mutex.lock();
+        while (self.active_clients > 0) {
+            self.client_cond.wait(&self.client_mutex);
+        }
+        self.client_mutex.unlock();
+
         // Remove socket file
-        std.fs.deleteFileAbsolute(self.socket_path) catch {};
+        socket_client.removeSocketFile(self.socket_path) catch {};
 
         // Free memory
         self.alloc.free(self.socket_path);
@@ -136,51 +138,55 @@ pub const Server = struct {
         log.info("IPC server stopped", .{});
     }
 
-    /// GLib callback to poll the socket.
-    fn pollCallback(user_data: ?*anyopaque) callconv(.c) c_int {
-        const self: *Server = @ptrCast(@alignCast(user_data));
-        self.acceptAll();
-        return 1; // Keep timer active
-    }
+    fn acceptLoop(self: *Server) void {
+        while (true) {
+            var client_addr: posix.sockaddr.un = undefined;
+            var addr_len: posix.socklen_t = @sizeOf(posix.sockaddr.un);
 
-    /// Accept all pending connections.
-    fn acceptAll(self: *Server) void {
-        while (self.acceptOne()) {}
-    }
+            const client_fd = posix.accept(
+                self.socket_fd,
+                @ptrCast(&client_addr),
+                &addr_len,
+                0,
+            ) catch |e| {
+                self.client_mutex.lock();
+                const shutting_down = self.shutting_down;
+                self.client_mutex.unlock();
+                if (shutting_down) return;
 
-    /// Accept and handle a single connection.
-    /// Spawns a thread for blocking I/O to avoid stalling the GTK main loop.
-    fn acceptOne(self: *Server) bool {
-        var client_addr: posix.sockaddr.un = undefined;
-        var addr_len: posix.socklen_t = @sizeOf(posix.sockaddr.un);
-
-        const client_fd = posix.accept(
-            self.socket_fd,
-            @ptrCast(&client_addr),
-            &addr_len,
-            0,
-        ) catch |e| switch (e) {
-            error.WouldBlock => return false,
-            else => {
                 log.err("accept failed: {}", .{e});
-                return false;
-            },
-        };
+                return;
+            };
 
-        // Spawn a detached thread for this client's I/O.
-        // The thread handles blocking reads/writes off the main loop.
-        const thread = std.Thread.spawn(.{}, clientThread, .{ self, client_fd }) catch |e| {
-            log.err("failed to spawn client thread: {}", .{e});
-            posix.close(client_fd);
-            return true;
-        };
-        thread.detach();
-        return true;
+            self.client_mutex.lock();
+            if (self.shutting_down) {
+                self.client_mutex.unlock();
+                posix.close(client_fd);
+                return;
+            }
+            if (self.active_clients >= max_concurrent_clients) {
+                self.client_mutex.unlock();
+                self.sendBusy(client_fd);
+                posix.close(client_fd);
+                continue;
+            }
+            self.active_clients += 1;
+            self.client_mutex.unlock();
+
+            const thread = std.Thread.spawn(.{}, clientThread, .{ self, client_fd }) catch |e| {
+                log.err("failed to spawn client thread: {}", .{e});
+                self.clientDone();
+                posix.close(client_fd);
+                continue;
+            };
+            thread.detach();
+        }
     }
 
     /// Client thread: validates peer, reads request, dispatches to main thread,
     /// sends response. All blocking I/O happens here, not on the GTK main loop.
     fn clientThread(self: *Server, client_fd: posix.socket_t) void {
+        defer self.clientDone();
         defer posix.close(client_fd);
 
         // Validate peer is same user
@@ -213,7 +219,7 @@ pub const Server = struct {
 
         const request = self.readRequest(client_fd, alloc) catch |e| {
             log.err("failed to read request: {}", .{e});
-            self.sendError(client_fd, "Failed to read request");
+            self.sendReadError(client_fd, e);
             return;
         };
 
@@ -329,12 +335,14 @@ pub const Server = struct {
         try readExact(client_fd, buf);
 
         // Parse JSON
-        return try std.json.parseFromSliceLeaky(
+        const request = try std.json.parseFromSliceLeaky(
             socket_client.Request,
             alloc,
             buf,
             .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
         );
+        try socket_client.validateRequestVersion(request);
+        return request;
     }
 
     fn sendResponse(self: *Server, client_fd: posix.socket_t, alloc: Allocator, response: socket_client.Response) !void {
@@ -358,6 +366,26 @@ pub const Server = struct {
             .ok = false,
             .@"error" = message,
         }) catch {};
+    }
+
+    fn sendBusy(self: *Server, client_fd: posix.socket_t) void {
+        self.sendError(client_fd, "Too many concurrent IPC requests");
+    }
+
+    fn sendReadError(self: *Server, client_fd: posix.socket_t, err: anyerror) void {
+        switch (err) {
+            error.UnsupportedProtocolVersion => self.sendError(client_fd, "Unsupported protocol version"),
+            else => self.sendError(client_fd, "Failed to read request"),
+        }
+    }
+
+    fn clientDone(self: *Server) void {
+        self.client_mutex.lock();
+        defer self.client_mutex.unlock();
+        self.active_clients -= 1;
+        if (self.shutting_down and self.active_clients == 0) {
+            self.client_cond.signal();
+        }
     }
 };
 
