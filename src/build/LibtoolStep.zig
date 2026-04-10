@@ -1,10 +1,11 @@
-//! A zig builder step that runs "libtool" against a list of libraries
-//! in order to create a single combined static library.
+//! A zig builder step that merges multiple static libraries into a single
+//! combined archive. Uses `zig ar` (LLVM archiver) instead of Apple's
+//! `libtool -static` to avoid a macOS 26+ bug where libtool silently drops
+//! archive members that aren't 8-byte aligned.
 const LibtoolStep = @This();
 
 const std = @import("std");
 const Step = std.Build.Step;
-const RunStep = std.Build.Step.Run;
 const LazyPath = std.Build.LazyPath;
 
 pub const Options = struct {
@@ -22,16 +23,14 @@ pub const Options = struct {
 /// The step to depend on.
 step: *Step,
 
-/// The output file from the libtool run.
+/// The output file from the archive merge.
 output: LazyPath,
 
-/// Run libtool against a list of library files to combine into a single
-/// static library.
 pub fn create(b: *std.Build, opts: Options) *LibtoolStep {
     const self = b.allocator.create(LibtoolStep) catch @panic("OOM");
 
-    const run_step = RunStep.create(b, b.fmt("libtool {s}", .{opts.name}));
-    run_step.addArgs(&.{ "libtool", "-static", "-o" });
+    const run_step = Step.Run.create(b, b.fmt("libtool {s}", .{opts.name}));
+    run_step.addArgs(&.{ b.graph.zig_exe, "ar", "qcL" });
     const output = run_step.addOutputFileArg(opts.out_name);
     for (opts.sources) |source| run_step.addFileArg(source);
 

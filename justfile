@@ -13,7 +13,7 @@ build:
 
 # Build (release)
 build-release:
-    zig build -Doptimize=ReleaseFast
+    zig build -Doptimize=ReleaseFast -Dsentry=false -Dxcframework-target=native
 
 # Build CLI only (skip macOS app bundle)
 build-cli:
@@ -93,7 +93,8 @@ test-nix:
 
 # Install to /usr/local/bin
 install: build-release
-    sudo cp zig-out/bin/ghostty-automator /usr/local/bin/
+    cp -R zig-out/Ghostty.app "/Applications/Ghostty Automator.app"
+    sudo ln -sf "/Applications/Ghostty Automator.app/Contents/MacOS/ghostty" /usr/local/bin/ghostty-automator
 
 # Install skills to Claude Code plugin directory
 install-skills dest="~/.claude/skills":
