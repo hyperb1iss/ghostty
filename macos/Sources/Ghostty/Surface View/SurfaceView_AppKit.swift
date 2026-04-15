@@ -1960,9 +1960,7 @@ extension Ghostty.SurfaceView: NSTextInputClient {
         return window.convertToScreen(winRect)
     }
 
-    func insertText(_ string: Any, replacementRange: NSRange) {
-        // We must have an associated event
-        guard NSApp.currentEvent != nil else { return }
+    private func handleInsertedText(_ string: Any) {
         guard let surfaceModel else { return }
 
         // We want the string view of the any value
@@ -1988,6 +1986,14 @@ extension Ghostty.SurfaceView: NSTextInputClient {
         }
 
         surfaceModel.sendText(chars)
+    }
+
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        // NSTextInputClient entrypoints should only run while AppKit is
+        // dispatching an input event. Other callers, such as drop handlers,
+        // use `handleInsertedText` directly.
+        guard NSApp.currentEvent != nil else { return }
+        handleInsertedText(string)
     }
 
     /// This function needs to exist for two reasons:
@@ -2185,10 +2191,7 @@ extension Ghostty.SurfaceView {
 
         if let content {
             DispatchQueue.main.async {
-                self.insertText(
-                    content,
-                    replacementRange: NSRange(location: 0, length: 0)
-                )
+                self.handleInsertedText(content)
             }
             return true
         }
